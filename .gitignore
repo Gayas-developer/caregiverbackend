@@ -1,0 +1,5 @@
+node_modules
+/apps/api/.env
+/apps/api/node_modules
+/apps/worker/.env
+/apps/worker/node_modules

@@ -1,0 +1,153 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ORG_ADMIN
+  BRANCH_MANAGER
+  CLINICAL_REVIEWER
+  CAREGIVER
+}
+
+enum VitalType {
+  HEART_RATE
+  BP
+  TEMPERATURE
+}
+
+model Organisation {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  branches  Branch[]
+  users     User[]
+  createdAt DateTime @default(now())
+}
+
+model Branch {
+  id             String             @id @default(cuid())
+  name           String
+  organisationId String
+  organisation   Organisation       @relation(fields: [organisationId], references: [id])
+  users          User[]
+  patients       Patient[]
+  thresholds     ThresholdProfile[]
+}
+
+model User {
+  id             String       @id @default(cuid())
+  email          String       @unique
+  passwordHash   String
+  role           Role
+  organisationId String
+  branchId       String?
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  branch         Branch?      @relation(fields: [branchId], references: [id])
+  createdAt      DateTime     @default(now())
+
+  // Back-relation to visits where this user is the caregiver
+  visitsCaregiven Visit[] @relation("CaregiverVisits")
+}
+
+model Patient {
+  id        String         @id @default(cuid())
+  branchId  String
+  branch    Branch         @relation(fields: [branchId], references: [id])
+  firstName String
+  lastName  String
+  dob       DateTime?
+  createdAt DateTime       @default(now())
+  visits    Visit[]
+  vitals    VitalReading[]
+  consents  Consent[]
+}
+
+model Visit {
+  id          String         @id @default(cuid())
+  patientId   String
+  caregiverId String
+  startedAt   DateTime       @default(now())
+  endedAt     DateTime?
+  notes       String?
+  patient     Patient        @relation(fields: [patientId], references: [id])
+  caregiver   User           @relation("CaregiverVisits", fields: [caregiverId], references: [id])
+  vitals      VitalReading[]
+}
+
+model VitalReading {
+  id         String    @id @default(cuid())
+  patientId  String
+  visitId    String?
+  type       VitalType
+  valueNum   Float?
+  systolic   Int?
+  diastolic  Int?
+  unit       String?
+  recordedAt DateTime  @default(now())
+  patient    Patient   @relation(fields: [patientId], references: [id])
+  visit      Visit?    @relation(fields: [visitId], references: [id])
+}
+
+model ThresholdProfile {
+  id       String    @id @default(cuid())
+  branchId String
+  type     VitalType
+  low      Float?
+  high     Float?
+  branch   Branch    @relation(fields: [branchId], references: [id])
+
+  @@unique([branchId, type], name: "branchId_type")
+}
+
+model Alert {
+  id        String             @id @default(cuid())
+  patientId String
+  vitalId   String?
+  level     String
+  message   String
+  status    String             @default("OPEN")
+  createdAt DateTime           @default(now())
+  actions   EscalationAction[]
+}
+
+model EscalationAction {
+  id        String   @id @default(cuid())
+  alertId   String
+  actorId   String?
+  action    String
+  timestamp DateTime @default(now())
+  alert     Alert    @relation(fields: [alertId], references: [id])
+}
+
+model Consent {
+  id         String   @id @default(cuid())
+  patientId  String
+  type       String
+  granted    Boolean
+  capturedAt DateTime @default(now())
+  patient    Patient  @relation(fields: [patientId], references: [id])
+}
+
+model AuditLog {
+  id       String   @id @default(cuid())
+  orgId    String
+  actorId  String?
+  entity   String
+  entityId String?
+  action   String
+  details  Json?
+  at       DateTime @default(now())
+}
+
+model RevokedToken {
+  id        String   @id @default(cuid())
+  jti       String   @unique
+  type      String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}

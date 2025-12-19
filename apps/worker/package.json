@@ -1,0 +1,25 @@
+{
+  "name": "@care/worker",
+  "version": "0.0.1",
+  "private": true,
+  "main": "dist/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "ts-node-dev --transpile-only src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.19.1",
+    "@sendgrid/mail": "^8.1.6",
+    "bullmq": "^5.7.9",
+    "dotenv": "^16.4.5",
+    "ioredis": "^5.4.1",
+    "pino": "^9.3.2"
+  },
+  "devDependencies": {
+    "prisma": "^5.19.1",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.4.5"
+  }
+}
