@@ -8,9 +8,9 @@ import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../uti
 export const router = Router();
 
 const registerSchema = z.object({
+  displayName: z.string().min(2),
   email: z.string().email(),
   password: z.string().min(6),
-  role: z.enum(['ORG_ADMIN','BRANCH_MANAGER','CLINICAL_REVIEWER','CAREGIVER']).default('ORG_ADMIN'),
   organisation: z.object({ name: z.string().min(2), slug: z.string().min(2) }),
   branch: z.object({ name: z.string().min(2) }).optional()
 });
@@ -18,12 +18,18 @@ const registerSchema = z.object({
 router.post('/register', async (req, res, next) => {
   try {
     const data = registerSchema.parse(req.body);
+    const exists = await prisma.user.findUnique({ where: { email: data.email } });
+    if (exists) return res.status(409).json({ error: { message: 'Email already exists' } });
+
+    const slugExists = await prisma.organisation.findUnique({ where: { slug: data.organisation.slug } });
+    if (slugExists) return res.status(409).json({ error: { message: 'Organisation slug already exists' } });
+
     const hash = await bcrypt.hash(data.password, 10);
 
     const org = await prisma.organisation.create({ data: { name: data.organisation.name, slug: data.organisation.slug } });
     const branch = await prisma.branch.create({ data: { name: data.branch?.name || 'Main', organisationId: org.id } });
     const user = await prisma.user.create({
-      data: { email: data.email, passwordHash: hash, role: data.role, organisationId: org.id, branchId: branch.id }
+      data: { displayName: data.displayName, email: data.email, passwordHash: hash, role: 'ORG_ADMIN', organisationId: org.id, branchId: branch.id }
     });
 
     const access = signAccessToken({ sub: user.id, orgId: org.id, branchId: branch.id, role: user.role });
@@ -38,6 +44,9 @@ router.post('/login', async (req, res, next) => {
     const { email, password } = loginSchema.parse(req.body);
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.status(401).json({ error: { message: 'Invalid credentials' } });
+    if ((user.role === 'CAREGIVER' || user.role === 'BRANCH_MANAGER') && !user.branchId) {
+      return res.status(403).json({ error: { message: 'User is not assigned to a branch' } });
+    }    
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(401).json({ error: { message: 'Invalid credentials' } });
 

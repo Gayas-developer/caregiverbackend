@@ -20,6 +20,11 @@ enum VitalType {
   TEMPERATURE
 }
 
+enum VisitStatus {
+  OPEN
+  CLOSED
+}
+
 model Organisation {
   id        String   @id @default(cuid())
   name      String
@@ -37,10 +42,12 @@ model Branch {
   users          User[]
   patients       Patient[]
   thresholds     ThresholdProfile[]
+  visits         Visit[]
 }
 
 model User {
   id             String       @id @default(cuid())
+  displayName    String?
   email          String       @unique
   passwordHash   String
   role           Role
@@ -70,11 +77,17 @@ model Patient {
 model Visit {
   id          String         @id @default(cuid())
   patientId   String
+  branchId    String
   caregiverId String
   startedAt   DateTime       @default(now())
   endedAt     DateTime?
+  status      VisitStatus    @default(OPEN)
   notes       String?
+  symptoms    Json?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
   patient     Patient        @relation(fields: [patientId], references: [id])
+  branch      Branch         @relation(fields: [branchId], references: [id])
   caregiver   User           @relation("CaregiverVisits", fields: [caregiverId], references: [id])
   vitals      VitalReading[]
 }
@@ -82,7 +95,7 @@ model Visit {
 model VitalReading {
   id         String    @id @default(cuid())
   patientId  String
-  visitId    String?
+  visitId    String
   type       VitalType
   valueNum   Float?
   systolic   Int?
@@ -90,7 +103,7 @@ model VitalReading {
   unit       String?
   recordedAt DateTime  @default(now())
   patient    Patient   @relation(fields: [patientId], references: [id])
-  visit      Visit?    @relation(fields: [visitId], references: [id])
+  visit      Visit     @relation(fields: [visitId], references: [id])
 }
 
 model ThresholdProfile {
@@ -107,6 +120,8 @@ model ThresholdProfile {
 model Alert {
   id        String             @id @default(cuid())
   patientId String
+  branchId  String
+  visitId   String
   vitalId   String?
   level     String
   message   String

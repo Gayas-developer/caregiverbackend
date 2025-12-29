@@ -40,16 +40,24 @@ export async function isTokenRevoked(jti: string) {
 }
 
 export function authenticate(req: Request, _res: Response, next: NextFunction) {
-  try {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) throw Object.assign(new Error('Unauthorized'), { status: 401 });
-    const payload = jwt.verify(token, process.env.JWT_ACCESS_SECRET!) as JwtPayload;
-    (req as any).user = payload;
-    next();
-  } catch {
-    next(Object.assign(new Error('Unauthorized'), { status: 401 }));
-  }
+  (async () => {
+    try {
+      const auth = req.headers.authorization || '';
+      const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+      if (!token) throw Object.assign(new Error('Unauthorized'), { status: 401 });
+
+      const payload = jwt.verify(token, process.env.JWT_ACCESS_SECRET!) as JwtPayload;
+      if (payload.type !== 'access') throw Object.assign(new Error('Unauthorized'), { status: 401 });
+
+      const revoked = await isTokenRevoked(payload.jti);
+      if (revoked) throw Object.assign(new Error('Unauthorized'), { status: 401 });
+
+      (req as any).user = payload;
+      next();
+    } catch {
+      next(Object.assign(new Error('Unauthorized'), { status: 401 }));
+    }
+  })();
 }
 
 export function tenantScope(req: Request, _res: Response, next: NextFunction) {

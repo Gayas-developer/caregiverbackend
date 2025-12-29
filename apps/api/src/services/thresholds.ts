@@ -35,7 +35,15 @@ export async function evaluateThresholdsAndCreateAlertIfNeeded(vital: any) {
   if (!breach) return null;
 
   const alert = await prisma.alert.create({
-    data: { patientId: vital.patientId, vitalId: vital.id, level: 'WARN', message, status: 'OPEN' }
+    data: {
+      patientId: vital.patientId,
+      branchId: patient.branchId,
+      visitId: vital.visitId,
+      vitalId: vital.id,
+      level: 'WARN',
+      message,
+      status: 'OPEN'
+    }
   });
 
   return alert;
