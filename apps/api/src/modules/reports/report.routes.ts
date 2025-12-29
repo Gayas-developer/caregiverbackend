@@ -15,7 +15,7 @@ router.get('/patients.csv', authenticate, tenantScope, async (req, res, next) =>
       include: { branch: true }
     });
     const header = 'id,firstName,lastName,branchId\n';
-    const rows = list.map(p => `${p.id},${p.firstName},${p.lastName},${p.branchId}`).join('\n');
+    const rows = list.map((p: any) => `${p.id},${p.firstName},${p.lastName},${p.branchId}`).join('\n');
     const csv = header + rows + '\n';
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="patients.csv"');
