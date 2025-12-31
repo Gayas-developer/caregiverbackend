@@ -13,13 +13,13 @@ import { docs } from './swagger';
 import { audit } from './middleware/audit';
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-
+import { router as profile } from './modules/profile/profile.routes';
 
 export function createServer() {
   const app = express();
 
   app.use(helmet());
-  app.use(rateLimit({ windowMs: 15*60*1000, max: 500 }));
+  app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 500 }));
 
   app.use(cors());
   app.use(express.json());
@@ -37,6 +37,7 @@ export function createServer() {
   app.use('/v1/vitals', vitals);
   app.use('/v1/thresholds', thresholds);
   app.use('/v1/reports', reports);
+  app.use('/v1/profile', profile);
 
   app.use(errorHandler);
   return app;

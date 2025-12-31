@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { prisma } from '../../utils/prisma';
 import { z } from 'zod';
 import bcrypt from 'bcrypt';
-import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../utils/auth';
+import { authenticate, signAccessToken, signRefreshToken, verifyRefreshToken } from '../../utils/auth';
 
 export const router = Router();
 
@@ -46,7 +46,7 @@ router.post('/login', async (req, res, next) => {
     if (!user) return res.status(401).json({ error: { message: 'Invalid credentials' } });
     if ((user.role === 'CAREGIVER' || user.role === 'BRANCH_MANAGER') && !user.branchId) {
       return res.status(403).json({ error: { message: 'User is not assigned to a branch' } });
-    }    
+    }
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(401).json({ error: { message: 'Invalid credentials' } });
 
@@ -70,18 +70,18 @@ router.post('/refresh', async (req, res, next) => {
     const access = signAccessToken({ sub: user.id, orgId: user.organisationId, branchId: user.branchId || null, role: user.role });
     const newRefresh = signRefreshToken({ sub: user.id, orgId: user.organisationId, branchId: user.branchId || null, role: user.role });
 
-    await prisma.revokedToken.create({ data: { jti: payload.jti, type: 'refresh', expiresAt: new Date(Date.now() + 7*24*3600*1000) } });
+    await prisma.revokedToken.create({ data: { jti: payload.jti, type: 'refresh', expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000) } });
     res.json({ data: { tokens: { access, refresh: newRefresh } } });
   } catch (e) { next(e); }
 });
 
 router.post('/logout', async (req, res, next) => {
   try {
-    const { token, type } = z.object({ token: z.string().min(1), type: z.enum(['access','refresh']) }).parse(req.body);
+    const { token, type } = z.object({ token: z.string().min(1), type: z.enum(['access', 'refresh']) }).parse(req.body);
     const secret = type === 'refresh' ? process.env.JWT_REFRESH_SECRET! : process.env.JWT_ACCESS_SECRET!;
     const payload = jwt.verify(token, secret) as any;
-    const expSec = Math.max(0, (payload.exp ?? 0) - Math.floor(Date.now()/1000));
-    await prisma.revokedToken.create({ data: { jti: payload.jti, type, expiresAt: new Date(Date.now() + expSec*1000) } });
+    const expSec = Math.max(0, (payload.exp ?? 0) - Math.floor(Date.now() / 1000));
+    await prisma.revokedToken.create({ data: { jti: payload.jti, type, expiresAt: new Date(Date.now() + expSec * 1000) } });
     res.json({ data: { ok: true } });
   } catch (e) { next(e); }
 });
