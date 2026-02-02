@@ -24,11 +24,19 @@ router.post('/branches', authenticate, tenantScope, requireRole('ORG_ADMIN'), as
   try {
     const data = branchCreateSchema.parse(req.body);
     const ctx = (req as any).ctx as { orgId: string };
-    const branch = await prisma.branch.create({ data: { name: data.name, organisationId: ctx.orgId } });
+    const branch = await prisma.branch.create(  { data: { name: data.name, organisationId: ctx.orgId } });
     res.status(201).json({ data: branch });
   } catch (e) {
     next(e);
   }
+});
+
+router.get('/branches', authenticate, tenantScope, requireRole('ORG_ADMIN'), async (req, res, next) => {
+  try {
+    const ctx = (req as any).ctx as { orgId: string };
+    const branches = await prisma.branch.findMany({ where: { organisationId: ctx.orgId } });
+    res.json({ data: branches });
+  } catch (e) { next(e); }
 });
 
 const createUserSchema = z.object({
