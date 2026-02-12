@@ -8,9 +8,15 @@ export const router = Router();
 
 router.get('/me', authenticate, tenantScope, async (req, res, next) => {
   try {
-    const ctx = (req as any).ctx as { orgId: string; branchId: string | null; role: string };
+    const user = (req as any).user as { sub: string };
+    const dbUser = await prisma.user.findUnique({
+      where: { id: user.sub },
+      select: { organisationId: true },
+    });
+    if (!dbUser) return res.status(401).json({ error: { message: 'Unauthorized' } });
+
     const org = await prisma.organisation.findUnique({
-      where: { id: ctx.orgId },
+      where: { id: dbUser.organisationId },
       include: { branches: true }
     });
     res.json({ data: org });
@@ -23,8 +29,26 @@ const branchCreateSchema = z.object({ name: z.string().min(2) });
 router.post('/branches', authenticate, tenantScope, requireRole('ORG_ADMIN'), async (req, res, next) => {
   try {
     const data = branchCreateSchema.parse(req.body);
-    const ctx = (req as any).ctx as { orgId: string };
-    const branch = await prisma.branch.create(  { data: { name: data.name, organisationId: ctx.orgId } });
+    const user = (req as any).user as { sub: string };
+    const dbUser = await prisma.user.findUnique({
+      where: { id: user.sub },
+      select: { organisationId: true },
+    });
+    if (!dbUser) return res.status(401).json({ error: { message: 'Unauthorized' } });
+
+    const org = await prisma.organisation.findUnique({
+      where: { id: dbUser.organisationId },
+      select: { id: true },
+    });
+    if (!org) {
+      return res
+        .status(400)
+        .json({ error: { message: 'Organisation not found for current user' } });
+    }
+
+    const branch = await prisma.branch.create({
+      data: { name: data.name, organisationId: org.id },
+    });
     res.status(201).json({ data: branch });
   } catch (e) {
     next(e);
@@ -33,8 +57,16 @@ router.post('/branches', authenticate, tenantScope, requireRole('ORG_ADMIN'), as
 
 router.get('/branches', authenticate, tenantScope, requireRole('ORG_ADMIN'), async (req, res, next) => {
   try {
-    const ctx = (req as any).ctx as { orgId: string };
-    const branches = await prisma.branch.findMany({ where: { organisationId: ctx.orgId } });
+    const user = (req as any).user as { sub: string };
+    const dbUser = await prisma.user.findUnique({
+      where: { id: user.sub },
+      select: { organisationId: true },
+    });
+    if (!dbUser) return res.status(401).json({ error: { message: 'Unauthorized' } });
+
+    const branches = await prisma.branch.findMany({
+      where: { organisationId: dbUser.organisationId },
+    });
     res.json({ data: branches });
   } catch (e) { next(e); }
 });
