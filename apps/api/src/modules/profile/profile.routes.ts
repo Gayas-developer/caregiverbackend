@@ -19,7 +19,8 @@ router.get("/me", authenticate, tenantScope, async (req, res, next) => {
         role: true,
         organisationId: true,
         branchId: true,
-        displayName: true, // ✅ you added this
+        displayName: true,
+        avatarUrl: true,
         createdAt: true,
         organisation: { select: { id: true, name: true, slug: true } },
         branch: { select: { id: true, name: true } },
@@ -35,8 +36,17 @@ router.get("/me", authenticate, tenantScope, async (req, res, next) => {
 });
 
 const updateProfileSchema = z.object({
-  displayName: z.string().min(2).max(80).optional(),
-  // later you can add phone/avatarUrl etc
+  displayName: z.string().trim().min(2).max(80).optional(),
+  avatarUrl: z
+    .union([z.string().trim().max(4_000_000), z.literal(""), z.null()])
+    .refine(
+      value =>
+        value === null ||
+        value === "" ||
+        /^(https?:\/\/|file:\/\/|content:\/\/|data:image\/)/i.test(value),
+      { message: "Invalid avatar image format" },
+    )
+    .optional(),
 });
 
 router.patch("/me", authenticate, tenantScope, async (req, res, next) => {
@@ -44,6 +54,8 @@ router.patch("/me", authenticate, tenantScope, async (req, res, next) => {
     const user = (req as any).user as JwtPayload;
     const ctx = (req as any).ctx as { orgId: string };
     const data = updateProfileSchema.parse(req.body);
+    const nextAvatarUrl =
+      data.avatarUrl === undefined ? undefined : data.avatarUrl || null;
 
     // ensure user belongs to org (defensive)
     const exists = await prisma.user.findFirst({
@@ -59,6 +71,7 @@ router.patch("/me", authenticate, tenantScope, async (req, res, next) => {
         ...(data.displayName !== undefined
           ? { displayName: data.displayName }
           : {}),
+        ...(nextAvatarUrl !== undefined ? { avatarUrl: nextAvatarUrl } : {}),
       },
       select: {
         id: true,
@@ -67,6 +80,7 @@ router.patch("/me", authenticate, tenantScope, async (req, res, next) => {
         organisationId: true,
         branchId: true,
         displayName: true,
+        avatarUrl: true,
         createdAt: true,
         organisation: { select: { id: true, name: true, slug: true } },
         branch: { select: { id: true, name: true } },
@@ -87,6 +101,11 @@ router.post("/change-password", authenticate, async (req, res, next) => {
   try {
     const user = (req as any).user as JwtPayload;
     const { oldPassword, newPassword } = changePasswordSchema.parse(req.body);
+    if (oldPassword === newPassword) {
+      return res
+        .status(400)
+        .json({ error: { message: "New password must be different" } });
+    }
 
     const dbUser = await prisma.user.findUnique({
       where: { id: user.sub },

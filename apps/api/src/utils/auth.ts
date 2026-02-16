@@ -61,10 +61,37 @@ export function authenticate(req: Request, _res: Response, next: NextFunction) {
 }
 
 export function tenantScope(req: Request, _res: Response, next: NextFunction) {
-  const user = (req as any).user as JwtPayload | undefined;
-  if (!user?.orgId) return next(Object.assign(new Error('ORG_CONTEXT_MISSING'), { status: 400 }));
-  (req as any).ctx = { orgId: user.orgId, branchId: user.branchId || null, role: user.role };
-  next();
+  (async () => {
+    try {
+      const user = (req as any).user as JwtPayload | undefined;
+      if (!user?.sub) {
+        throw Object.assign(new Error('ORG_CONTEXT_MISSING'), { status: 400 });
+      }
+
+      const dbUser = await prisma.user.findUnique({
+        where: { id: user.sub },
+        select: {
+          organisationId: true,
+          branchId: true,
+          role: true,
+        },
+      });
+
+      if (!dbUser?.organisationId) {
+        throw Object.assign(new Error('ORG_CONTEXT_MISSING'), { status: 400 });
+      }
+
+      (req as any).ctx = {
+        orgId: dbUser.organisationId,
+        branchId: dbUser.branchId || null,
+        role: dbUser.role,
+      };
+
+      next();
+    } catch (e) {
+      next(e);
+    }
+  })();
 }
 
 export function requireRole(...roles: string[]) {

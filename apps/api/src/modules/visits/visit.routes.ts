@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../utils/prisma';
 import { authenticate, tenantScope, requireRole } from '../../utils/auth';
+import { publishOrgEvent } from '../../realtime/hub';
 
 export const router = Router();
 
@@ -28,13 +29,13 @@ router.post('/', authenticate, tenantScope, requireRole('ORG_ADMIN','BRANCH_MANA
     });
 
     if (!patient) return res.status(404).json({ error: { message: 'Patient not found' } });
-    if (patient.branch.organisationId !== ctx.orgId) return res.status(403).json({ error: { message: 'Forbidden' } });
+    if (patient.branch.organisationId !== ctx.orgId) return res.status(403).json({ error: { message: 'Patient is not in your organisation' } });
     if (ctx.role === 'CAREGIVER' || ctx.role === 'BRANCH_MANAGER') {
       if (!ctx.branchId) {
-        return res.status(403).json({ error: { message: 'Branch context missing' } });
+        return res.status(403).json({ error: { message: 'Branch context missing. Please contact admin.' } });
       }
       if (patient.branchId !== ctx.branchId) {
-        return res.status(403).json({ error: { message: 'Forbidden' } });
+        return res.status(403).json({ error: { message: 'You can only start visits for patients in your branch' } });
       }
     }
     
@@ -48,6 +49,23 @@ router.post('/', authenticate, tenantScope, requireRole('ORG_ADMIN','BRANCH_MANA
         notes: data.notes
       }
     });
+
+    publishOrgEvent(
+      ctx.orgId,
+      'VISIT_STARTED',
+      {
+        visit: {
+          id: visit.id,
+          patientId: visit.patientId,
+          branchId: visit.branchId,
+          caregiverId: visit.caregiverId,
+          status: visit.status,
+          startedAt: visit.startedAt,
+        },
+        actorId: user.sub,
+      },
+      { branchId: visit.branchId },
+    );
 
     res.status(201).json({ data: visit });
   } catch (e) {
@@ -66,11 +84,11 @@ router.patch('/:id/close', authenticate, tenantScope, requireRole('ORG_ADMIN','B
       include: { patient: { include: { branch: true } } }
     });
     if (!visit) return res.status(404).json({ error: { message: 'Visit not found' } });
-    if (visit.patient.branch.organisationId !== ctx.orgId) return res.status(403).json({ error: { message: 'Forbidden' } });
-    if (ctx.branchId && visit.branchId !== ctx.branchId) return res.status(403).json({ error: { message: 'Forbidden' } });
+    if (visit.patient.branch.organisationId !== ctx.orgId) return res.status(403).json({ error: { message: 'Visit is not in your organisation' } });
+    if (ctx.role !== 'ORG_ADMIN' && ctx.branchId && visit.branchId !== ctx.branchId) return res.status(403).json({ error: { message: 'You can only access visits in your branch' } });
 
     if (ctx.role === 'CAREGIVER' && visit.caregiverId !== user.sub) {
-      return res.status(403).json({ error: { message: 'Forbidden' } });
+      return res.status(403).json({ error: { message: 'You can only close your own visits' } });
     }
 
     if (visit.status !== 'OPEN') {
@@ -81,6 +99,23 @@ router.patch('/:id/close', authenticate, tenantScope, requireRole('ORG_ADMIN','B
       where: { id },
       data: { status: 'CLOSED', endedAt: new Date() }
     });
+
+    publishOrgEvent(
+      ctx.orgId,
+      'VISIT_CLOSED',
+      {
+        visit: {
+          id: updated.id,
+          patientId: updated.patientId,
+          branchId: updated.branchId,
+          caregiverId: updated.caregiverId,
+          status: updated.status,
+          endedAt: updated.endedAt,
+        },
+        actorId: user.sub,
+      },
+      { branchId: updated.branchId },
+    );
 
     res.json({ data: updated });
   } catch (e) {
@@ -99,16 +134,19 @@ router.get('/', authenticate, tenantScope, async (req, res, next) => {
     const ctx = (req as any).ctx as { orgId: string; branchId: string | null; role: string };
     const q = listSchema.parse(req.query);
 
-    // Default behaviour
-    // If token has branchId, lock list to it
-    // If token has no branchId (org admin), allow optional branchId filter but enforce org ownership
     let branchId: string | undefined;
-    if (ctx.branchId) branchId = ctx.branchId;
-    else if (q.branchId) branchId = q.branchId;
+    if (ctx.role !== 'ORG_ADMIN') {
+      if (!ctx.branchId) {
+        return res.status(403).json({ error: { message: 'Branch context missing. Please contact admin.' } });
+      }
+      branchId = ctx.branchId;
+    } else if (q.branchId) {
+      branchId = q.branchId;
+    }
 
-    if (branchId && !ctx.branchId) {
+    if (branchId && ctx.role === 'ORG_ADMIN') {
       const branch = await prisma.branch.findUnique({ where: { id: branchId } });
-      if (!branch || branch.organisationId !== ctx.orgId) return res.status(403).json({ error: { message: 'Forbidden' } });
+      if (!branch || branch.organisationId !== ctx.orgId) return res.status(403).json({ error: { message: 'Branch is not in your organisation' } });
     }
 
     const visits = await prisma.visit.findMany({
@@ -163,8 +201,8 @@ router.get('/:id', authenticate, tenantScope, async (req, res, next) => {
     if (!visit) return res.status(404).json({ error: { message: 'Visit not found' } });
 
     const branch = await prisma.branch.findUnique({ where: { id: visit.branchId } });
-    if (!branch || branch.organisationId !== ctx.orgId) return res.status(403).json({ error: { message: 'Forbidden' } });
-    if (ctx.branchId && visit.branchId !== ctx.branchId) return res.status(403).json({ error: { message: 'Forbidden' } });
+    if (!branch || branch.organisationId !== ctx.orgId) return res.status(403).json({ error: { message: 'Visit is not in your organisation' } });
+    if (ctx.role !== 'ORG_ADMIN' && ctx.branchId && visit.branchId !== ctx.branchId) return res.status(403).json({ error: { message: 'You can only access visits in your branch' } });
 
     res.json({ data: visit });
   } catch (e) {
@@ -190,11 +228,11 @@ router.patch('/:id', authenticate, tenantScope, requireRole('ORG_ADMIN','BRANCH_
     });
 
     if (!visit) return res.status(404).json({ error: { message: 'Visit not found' } });
-    if (visit.patient.branch.organisationId !== ctx.orgId) return res.status(403).json({ error: { message: 'Forbidden' } });
-    if (ctx.branchId && visit.branchId !== ctx.branchId) return res.status(403).json({ error: { message: 'Forbidden' } });
+    if (visit.patient.branch.organisationId !== ctx.orgId) return res.status(403).json({ error: { message: 'Visit is not in your organisation' } });
+    if (ctx.role !== 'ORG_ADMIN' && ctx.branchId && visit.branchId !== ctx.branchId) return res.status(403).json({ error: { message: 'You can only access visits in your branch' } });
 
     if (ctx.role === 'CAREGIVER' && visit.caregiverId !== user.sub) {
-      return res.status(403).json({ error: { message: 'Forbidden' } });
+      return res.status(403).json({ error: { message: 'You can only edit your own visits' } });
     }
 
     // Optional: only allow editing while OPEN

@@ -5,6 +5,7 @@ const express_1 = require("express");
 const zod_1 = require("zod");
 const prisma_1 = require("../../utils/prisma");
 const auth_1 = require("../../utils/auth");
+const hub_1 = require("../../realtime/hub");
 exports.router = (0, express_1.Router)();
 const createPatientSchema = zod_1.z.object({
     branchId: zod_1.z.string().optional(),
@@ -16,34 +17,47 @@ exports.router.post('/', auth_1.authenticate, auth_1.tenantScope, (0, auth_1.req
     try {
         const data = createPatientSchema.parse(req.body);
         const ctx = req.ctx;
-        let branchIdToUse;
-        if (ctx.role === 'ORG_ADMIN') {
-            if (!data.branchId) {
-                return res.status(400).json({ error: { message: 'branchId is required for ORG_ADMIN' } });
-            }
-            const branch = await prisma_1.prisma.branch.findFirst({
-                where: { id: data.branchId, organisationId: ctx.orgId },
+        const user = req.user;
+        const branchIdToLookup = ctx.role === 'ORG_ADMIN'
+            ? data.branchId
+            : ctx.branchId;
+        if (ctx.role === 'ORG_ADMIN' && !data.branchId) {
+            return res.status(400).json({ error: { message: 'Please select a branch for this patient.' } });
+        }
+        if (ctx.role !== 'ORG_ADMIN' && !ctx.branchId) {
+            return res.status(403).json({ error: { message: 'Branch context missing. Please contact admin.' } });
+        }
+        // Use a transaction so branch validation and patient create are atomic (avoids FK race).
+        const patient = await prisma_1.prisma.$transaction(async (tx) => {
+            const branch = await tx.branch.findFirst({
+                where: { id: branchIdToLookup, organisationId: ctx.orgId },
                 select: { id: true },
             });
             if (!branch) {
-                return res.status(403).json({ error: { message: 'Branch not in your organisation' } });
+                if (ctx.role === 'ORG_ADMIN') {
+                    throw Object.assign(new Error('Branch not found or not in your organisation.'), { status: 403 });
+                }
+                throw Object.assign(new Error('Invalid branch assignment. Please contact admin.'), { status: 403 });
             }
-            branchIdToUse = branch.id;
-        }
-        else {
-            if (!ctx.branchId) {
-                return res.status(403).json({ error: { message: 'Branch context missing' } });
-            }
-            branchIdToUse = ctx.branchId;
-        }
-        const patient = await prisma_1.prisma.patient.create({
-            data: {
-                firstName: data.firstName,
-                lastName: data.lastName,
-                dob: data.dob ? new Date(data.dob) : null,
-                branchId: branchIdToUse,
-            },
+            return tx.patient.create({
+                data: {
+                    firstName: data.firstName,
+                    lastName: data.lastName,
+                    dob: data.dob ? new Date(data.dob) : null,
+                    branchId: branch.id,
+                },
+            });
         });
+        (0, hub_1.publishOrgEvent)(ctx.orgId, 'PATIENT_CREATED', {
+            patient: {
+                id: patient.id,
+                firstName: patient.firstName,
+                lastName: patient.lastName,
+                branchId: patient.branchId,
+                createdAt: patient.createdAt,
+            },
+            actorId: user.sub,
+        }, { branchId: patient.branchId });
         res.status(201).json({ data: patient });
     }
     catch (e) {

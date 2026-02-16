@@ -5,6 +5,7 @@ const express_1 = require("express");
 const zod_1 = require("zod");
 const prisma_1 = require("../../utils/prisma");
 const auth_1 = require("../../utils/auth");
+const hub_1 = require("../../realtime/hub");
 exports.router = (0, express_1.Router)();
 const startVisitSchema = zod_1.z.object({
     patientId: zod_1.z.string(),
@@ -27,13 +28,13 @@ exports.router.post('/', auth_1.authenticate, auth_1.tenantScope, (0, auth_1.req
         if (!patient)
             return res.status(404).json({ error: { message: 'Patient not found' } });
         if (patient.branch.organisationId !== ctx.orgId)
-            return res.status(403).json({ error: { message: 'Forbidden' } });
+            return res.status(403).json({ error: { message: 'Patient is not in your organisation' } });
         if (ctx.role === 'CAREGIVER' || ctx.role === 'BRANCH_MANAGER') {
             if (!ctx.branchId) {
-                return res.status(403).json({ error: { message: 'Branch context missing' } });
+                return res.status(403).json({ error: { message: 'Branch context missing. Please contact admin.' } });
             }
             if (patient.branchId !== ctx.branchId) {
-                return res.status(403).json({ error: { message: 'Forbidden' } });
+                return res.status(403).json({ error: { message: 'You can only start visits for patients in your branch' } });
             }
         }
         const visit = await prisma_1.prisma.visit.create({
@@ -45,6 +46,17 @@ exports.router.post('/', auth_1.authenticate, auth_1.tenantScope, (0, auth_1.req
                 notes: data.notes
             }
         });
+        (0, hub_1.publishOrgEvent)(ctx.orgId, 'VISIT_STARTED', {
+            visit: {
+                id: visit.id,
+                patientId: visit.patientId,
+                branchId: visit.branchId,
+                caregiverId: visit.caregiverId,
+                status: visit.status,
+                startedAt: visit.startedAt,
+            },
+            actorId: user.sub,
+        }, { branchId: visit.branchId });
         res.status(201).json({ data: visit });
     }
     catch (e) {
@@ -63,11 +75,11 @@ exports.router.patch('/:id/close', auth_1.authenticate, auth_1.tenantScope, (0, 
         if (!visit)
             return res.status(404).json({ error: { message: 'Visit not found' } });
         if (visit.patient.branch.organisationId !== ctx.orgId)
-            return res.status(403).json({ error: { message: 'Forbidden' } });
-        if (ctx.branchId && visit.branchId !== ctx.branchId)
-            return res.status(403).json({ error: { message: 'Forbidden' } });
+            return res.status(403).json({ error: { message: 'Visit is not in your organisation' } });
+        if (ctx.role !== 'ORG_ADMIN' && ctx.branchId && visit.branchId !== ctx.branchId)
+            return res.status(403).json({ error: { message: 'You can only access visits in your branch' } });
         if (ctx.role === 'CAREGIVER' && visit.caregiverId !== user.sub) {
-            return res.status(403).json({ error: { message: 'Forbidden' } });
+            return res.status(403).json({ error: { message: 'You can only close your own visits' } });
         }
         if (visit.status !== 'OPEN') {
             return res.status(409).json({ error: { message: 'Visit already closed' } });
@@ -76,6 +88,17 @@ exports.router.patch('/:id/close', auth_1.authenticate, auth_1.tenantScope, (0, 
             where: { id },
             data: { status: 'CLOSED', endedAt: new Date() }
         });
+        (0, hub_1.publishOrgEvent)(ctx.orgId, 'VISIT_CLOSED', {
+            visit: {
+                id: updated.id,
+                patientId: updated.patientId,
+                branchId: updated.branchId,
+                caregiverId: updated.caregiverId,
+                status: updated.status,
+                endedAt: updated.endedAt,
+            },
+            actorId: user.sub,
+        }, { branchId: updated.branchId });
         res.json({ data: updated });
     }
     catch (e) {
@@ -91,18 +114,20 @@ exports.router.get('/', auth_1.authenticate, auth_1.tenantScope, async (req, res
     try {
         const ctx = req.ctx;
         const q = listSchema.parse(req.query);
-        // Default behaviour
-        // If token has branchId, lock list to it
-        // If token has no branchId (org admin), allow optional branchId filter but enforce org ownership
         let branchId;
-        if (ctx.branchId)
+        if (ctx.role !== 'ORG_ADMIN') {
+            if (!ctx.branchId) {
+                return res.status(403).json({ error: { message: 'Branch context missing. Please contact admin.' } });
+            }
             branchId = ctx.branchId;
-        else if (q.branchId)
+        }
+        else if (q.branchId) {
             branchId = q.branchId;
-        if (branchId && !ctx.branchId) {
+        }
+        if (branchId && ctx.role === 'ORG_ADMIN') {
             const branch = await prisma_1.prisma.branch.findUnique({ where: { id: branchId } });
             if (!branch || branch.organisationId !== ctx.orgId)
-                return res.status(403).json({ error: { message: 'Forbidden' } });
+                return res.status(403).json({ error: { message: 'Branch is not in your organisation' } });
         }
         const visits = await prisma_1.prisma.visit.findMany({
             where: {
@@ -154,9 +179,9 @@ exports.router.get('/:id', auth_1.authenticate, auth_1.tenantScope, async (req, 
             return res.status(404).json({ error: { message: 'Visit not found' } });
         const branch = await prisma_1.prisma.branch.findUnique({ where: { id: visit.branchId } });
         if (!branch || branch.organisationId !== ctx.orgId)
-            return res.status(403).json({ error: { message: 'Forbidden' } });
-        if (ctx.branchId && visit.branchId !== ctx.branchId)
-            return res.status(403).json({ error: { message: 'Forbidden' } });
+            return res.status(403).json({ error: { message: 'Visit is not in your organisation' } });
+        if (ctx.role !== 'ORG_ADMIN' && ctx.branchId && visit.branchId !== ctx.branchId)
+            return res.status(403).json({ error: { message: 'You can only access visits in your branch' } });
         res.json({ data: visit });
     }
     catch (e) {
@@ -181,11 +206,11 @@ exports.router.patch('/:id', auth_1.authenticate, auth_1.tenantScope, (0, auth_1
         if (!visit)
             return res.status(404).json({ error: { message: 'Visit not found' } });
         if (visit.patient.branch.organisationId !== ctx.orgId)
-            return res.status(403).json({ error: { message: 'Forbidden' } });
-        if (ctx.branchId && visit.branchId !== ctx.branchId)
-            return res.status(403).json({ error: { message: 'Forbidden' } });
+            return res.status(403).json({ error: { message: 'Visit is not in your organisation' } });
+        if (ctx.role !== 'ORG_ADMIN' && ctx.branchId && visit.branchId !== ctx.branchId)
+            return res.status(403).json({ error: { message: 'You can only access visits in your branch' } });
         if (ctx.role === 'CAREGIVER' && visit.caregiverId !== user.sub) {
-            return res.status(403).json({ error: { message: 'Forbidden' } });
+            return res.status(403).json({ error: { message: 'You can only edit your own visits' } });
         }
         // Optional: only allow editing while OPEN
         if (visit.status !== 'OPEN') {

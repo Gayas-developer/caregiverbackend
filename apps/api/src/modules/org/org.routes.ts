@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../../utils/prisma';
 import { authenticate, tenantScope, requireRole } from '../../utils/auth';
 import bcrypt from 'bcrypt';
+import { publishOrgEvent } from '../../realtime/hub';
 
 export const router = Router();
 
@@ -36,19 +37,25 @@ router.post('/branches', authenticate, tenantScope, requireRole('ORG_ADMIN'), as
     });
     if (!dbUser) return res.status(401).json({ error: { message: 'Unauthorized' } });
 
-    const org = await prisma.organisation.findUnique({
-      where: { id: dbUser.organisationId },
-      select: { id: true },
+    // Use transaction so org lookup and branch create are atomic (avoids FK race).
+    const branch = await prisma.$transaction(async (tx) => {
+      const org = await tx.organisation.findUnique({
+        where: { id: dbUser.organisationId },
+        select: { id: true },
+      });
+      if (!org) {
+        throw Object.assign(new Error('Organisation not found for current user'), { status: 400 });
+      }
+      return tx.branch.create({
+        data: { name: data.name, organisationId: org.id },
+      });
     });
-    if (!org) {
-      return res
-        .status(400)
-        .json({ error: { message: 'Organisation not found for current user' } });
-    }
 
-    const branch = await prisma.branch.create({
-      data: { name: data.name, organisationId: org.id },
+    publishOrgEvent(dbUser.organisationId, 'BRANCH_CREATED', {
+      branch: { id: branch.id, name: branch.name, organisationId: branch.organisationId },
+      actorId: user.sub,
     });
+
     res.status(201).json({ data: branch });
   } catch (e) {
     next(e);

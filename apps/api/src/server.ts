@@ -8,6 +8,7 @@ import { router as vitals } from './modules/vitals/vital.routes';
 import { router as thresholds } from './modules/thresholds/threshold.routes';
 import { router as reports } from './modules/reports/report.routes';
 import { router as visits } from './modules/visits/visit.routes';
+import { router as alerts } from './modules/alerts/alert.routes';
 import { errorHandler } from './utils/error';
 import { docs } from './swagger';
 import { audit } from './middleware/audit';
@@ -34,6 +35,7 @@ export function createServer() {
   app.use('/v1/orgs', orgs);
   app.use('/v1/patients', patients);
   app.use('/v1/visits', visits);
+  app.use('/v1/alerts', alerts);
   app.use('/v1/vitals', vitals);
   app.use('/v1/thresholds', thresholds);
   app.use('/v1/reports', reports);

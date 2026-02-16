@@ -58,11 +58,34 @@ function authenticate(req, _res, next) {
     })();
 }
 function tenantScope(req, _res, next) {
-    const user = req.user;
-    if (!user?.orgId)
-        return next(Object.assign(new Error('ORG_CONTEXT_MISSING'), { status: 400 }));
-    req.ctx = { orgId: user.orgId, branchId: user.branchId || null, role: user.role };
-    next();
+    (async () => {
+        try {
+            const user = req.user;
+            if (!user?.sub) {
+                throw Object.assign(new Error('ORG_CONTEXT_MISSING'), { status: 400 });
+            }
+            const dbUser = await prisma_1.prisma.user.findUnique({
+                where: { id: user.sub },
+                select: {
+                    organisationId: true,
+                    branchId: true,
+                    role: true,
+                },
+            });
+            if (!dbUser?.organisationId) {
+                throw Object.assign(new Error('ORG_CONTEXT_MISSING'), { status: 400 });
+            }
+            req.ctx = {
+                orgId: dbUser.organisationId,
+                branchId: dbUser.branchId || null,
+                role: dbUser.role,
+            };
+            next();
+        }
+        catch (e) {
+            next(e);
+        }
+    })();
 }
 function requireRole(...roles) {
     return (req, _res, next) => {

@@ -9,6 +9,7 @@ const zod_1 = require("zod");
 const prisma_1 = require("../../utils/prisma");
 const auth_1 = require("../../utils/auth");
 const bcrypt_1 = __importDefault(require("bcrypt"));
+const hub_1 = require("../../realtime/hub");
 exports.router = (0, express_1.Router)();
 exports.router.get('/me', auth_1.authenticate, auth_1.tenantScope, async (req, res, next) => {
     try {
@@ -40,17 +41,22 @@ exports.router.post('/branches', auth_1.authenticate, auth_1.tenantScope, (0, au
         });
         if (!dbUser)
             return res.status(401).json({ error: { message: 'Unauthorized' } });
-        const org = await prisma_1.prisma.organisation.findUnique({
-            where: { id: dbUser.organisationId },
-            select: { id: true },
+        // Use transaction so org lookup and branch create are atomic (avoids FK race).
+        const branch = await prisma_1.prisma.$transaction(async (tx) => {
+            const org = await tx.organisation.findUnique({
+                where: { id: dbUser.organisationId },
+                select: { id: true },
+            });
+            if (!org) {
+                throw Object.assign(new Error('Organisation not found for current user'), { status: 400 });
+            }
+            return tx.branch.create({
+                data: { name: data.name, organisationId: org.id },
+            });
         });
-        if (!org) {
-            return res
-                .status(400)
-                .json({ error: { message: 'Organisation not found for current user' } });
-        }
-        const branch = await prisma_1.prisma.branch.create({
-            data: { name: data.name, organisationId: org.id },
+        (0, hub_1.publishOrgEvent)(dbUser.organisationId, 'BRANCH_CREATED', {
+            branch: { id: branch.id, name: branch.name, organisationId: branch.organisationId },
+            actorId: user.sub,
         });
         res.status(201).json({ data: branch });
     }

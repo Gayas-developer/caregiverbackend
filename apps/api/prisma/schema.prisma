@@ -48,6 +48,7 @@ model Branch {
 model User {
   id             String       @id @default(cuid())
   displayName    String?
+  avatarUrl      String?
   email          String       @unique
   passwordHash   String
   role           Role

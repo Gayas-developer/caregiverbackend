@@ -7,6 +7,7 @@ const prisma_1 = require("../../utils/prisma");
 const auth_1 = require("../../utils/auth");
 const thresholds_1 = require("../../services/thresholds");
 const producers_1 = require("../../jobs/producers");
+const hub_1 = require("../../realtime/hub");
 exports.router = (0, express_1.Router)();
 const vitalSchema = zod_1.z.object({
     visitId: zod_1.z.string(),
@@ -29,14 +30,15 @@ exports.router.post('/', auth_1.authenticate, auth_1.tenantScope, async (req, re
         if (!visit)
             return res.status(404).json({ error: { message: 'Visit not found' } });
         if (visit.patient.branch.organisationId !== ctx.orgId)
-            return res.status(403).json({ error: { message: 'Forbidden' } });
-        if (ctx.branchId && visit.branchId !== ctx.branchId)
-            return res.status(403).json({ error: { message: 'Forbidden' } });
+            return res.status(403).json({ error: { message: 'Visit is not in your organisation' } });
+        if (ctx.role !== 'ORG_ADMIN' && ctx.branchId && visit.branchId !== ctx.branchId) {
+            return res.status(403).json({ error: { message: 'You can only access visits in your branch' } });
+        }
         if (visit.status !== 'OPEN')
             return res.status(409).json({ error: { message: 'Visit is closed' } });
         // For caregivers, enforce that they can only record vitals on visits they own
         if (ctx.role === 'CAREGIVER' && visit.caregiverId !== user.sub) {
-            return res.status(403).json({ error: { message: 'Forbidden' } });
+            return res.status(403).json({ error: { message: 'You can only record vitals for your own visits' } });
         }
         const vital = await prisma_1.prisma.vitalReading.create({
             data: {
@@ -50,9 +52,35 @@ exports.router.post('/', auth_1.authenticate, auth_1.tenantScope, async (req, re
                 recordedAt: data.recordedAt ? new Date(data.recordedAt) : undefined
             }
         });
+        (0, hub_1.publishOrgEvent)(ctx.orgId, 'VITAL_RECORDED', {
+            vital: {
+                id: vital.id,
+                patientId: vital.patientId,
+                visitId: vital.visitId,
+                type: vital.type,
+                valueNum: vital.valueNum,
+                systolic: vital.systolic,
+                diastolic: vital.diastolic,
+                unit: vital.unit,
+                recordedAt: vital.recordedAt,
+            },
+        }, { branchId: visit.branchId });
         const alert = await (0, thresholds_1.evaluateThresholdsAndCreateAlertIfNeeded)(vital);
-        if (alert)
+        if (alert) {
             await (0, producers_1.enqueueAlertEmail)(alert);
+            (0, hub_1.publishOrgEvent)(ctx.orgId, 'ALERT_CREATED', {
+                alert: {
+                    id: alert.id,
+                    patientId: alert.patientId,
+                    visitId: alert.visitId,
+                    branchId: alert.branchId,
+                    level: alert.level,
+                    message: alert.message,
+                    status: alert.status,
+                    createdAt: alert.createdAt,
+                },
+            }, { branchId: alert.branchId });
+        }
         res.status(201).json({ data: { vital, alert } });
     }
     catch (e) {
