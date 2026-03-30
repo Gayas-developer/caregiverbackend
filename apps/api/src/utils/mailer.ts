@@ -47,3 +47,21 @@ export async function sendPasswordResetOtpEmail(params: {
     html: `<p>Your OTP is <b>${params.otp}</b>.</p><p>This code expires in 10 minutes.</p>`,
   });
 }
+
+export async function sendStaffTemporaryPasswordEmail(params: {
+  to: string;
+  displayName?: string | null;
+  temporaryPassword: string;
+}) {
+  const from = requireEnv('EMAIL_FROM');
+  const transport = getTransporter();
+  const greeting = params.displayName?.trim() || 'Hello';
+
+  await transport.sendMail({
+    from,
+    to: params.to,
+    subject: 'Your MyHomeCare temporary password',
+    text: `${greeting}, your temporary MyHomeCare password is ${params.temporaryPassword}. Please sign in and change it as soon as possible.`,
+    html: `<p>${greeting},</p><p>Your temporary MyHomeCare password is <b>${params.temporaryPassword}</b>.</p><p>Please sign in and change it as soon as possible.</p>`,
+  });
+}

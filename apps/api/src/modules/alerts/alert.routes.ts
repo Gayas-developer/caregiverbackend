@@ -22,15 +22,10 @@ router.get('/', authenticate, tenantScope, async (req, res, next) => {
     const q = listSchema.parse(req.query);
 
     let allowedBranchIds: string[] = [];
+    const roleCanViewOrgWide =
+      ctx.role === 'ORG_ADMIN' || ctx.role === 'CLINICAL_REVIEWER';
 
-    if (ctx.role !== 'ORG_ADMIN') {
-      if (!ctx.branchId) {
-        return res.status(403).json({
-          error: { message: 'Branch context missing. Please contact admin.' },
-        });
-      }
-      allowedBranchIds = [ctx.branchId];
-    } else if (q.branchId) {
+    if (q.branchId) {
       const branch = await prisma.branch.findUnique({ where: { id: q.branchId } });
       if (!branch || branch.organisationId !== ctx.orgId) {
         return res
@@ -38,6 +33,15 @@ router.get('/', authenticate, tenantScope, async (req, res, next) => {
           .json({ error: { message: 'Branch is not in your organisation' } });
       }
       allowedBranchIds = [q.branchId];
+    } else if (!roleCanViewOrgWide) {
+      if (!ctx.branchId) {
+        return res.status(403).json({
+          error: { message: 'Branch context missing. Please contact admin.' },
+        });
+      }
+      allowedBranchIds = [ctx.branchId];
+    } else if (ctx.role === 'CLINICAL_REVIEWER' && ctx.branchId) {
+      allowedBranchIds = [ctx.branchId];
     } else {
       const branches = await prisma.branch.findMany({
         where: { organisationId: ctx.orgId },
@@ -127,7 +131,7 @@ router.post(
   '/:id/actions',
   authenticate,
   tenantScope,
-  requireRole('ORG_ADMIN', 'BRANCH_MANAGER', 'CAREGIVER', 'CLINICAL_REVIEWER'),
+  requireRole('PLATFORM_ADMIN', 'ORG_ADMIN', 'BRANCH_MANAGER', 'CAREGIVER', 'CLINICAL_REVIEWER'),
   async (req, res, next) => {
     try {
       const id = z.string().parse(req.params.id);
@@ -146,15 +150,25 @@ router.post(
         where: { id: alert.branchId },
         select: { id: true, organisationId: true },
       });
-      if (!branch || branch.organisationId !== ctx.orgId) {
+      if (ctx.role !== 'PLATFORM_ADMIN' && (!branch || branch.organisationId !== ctx.orgId)) {
         return res
           .status(403)
           .json({ error: { message: 'Alert is not in your organisation' } });
       }
-      if (ctx.role !== 'ORG_ADMIN' && ctx.branchId && ctx.branchId !== alert.branchId) {
+      if (
+        ctx.role !== 'PLATFORM_ADMIN' &&
+        ctx.role !== 'ORG_ADMIN' &&
+        ctx.branchId &&
+        ctx.branchId !== alert.branchId
+      ) {
         return res
           .status(403)
           .json({ error: { message: 'You can only manage alerts in your branch' } });
+      }
+      if (ctx.role === 'CAREGIVER' && data.closeAlert) {
+        return res
+          .status(403)
+          .json({ error: { message: 'Caregivers can escalate alerts but cannot resolve them' } });
       }
 
       const result = await prisma.$transaction(async tx => {

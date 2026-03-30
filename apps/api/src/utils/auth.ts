@@ -74,11 +74,23 @@ export function tenantScope(req: Request, _res: Response, next: NextFunction) {
           organisationId: true,
           branchId: true,
           role: true,
+          isActive: true,
+          organisation: {
+            select: {
+              isActive: true,
+            },
+          },
         },
       });
 
       if (!dbUser?.organisationId) {
         throw Object.assign(new Error('ORG_CONTEXT_MISSING'), { status: 400 });
+      }
+      if (!dbUser.isActive) {
+        throw Object.assign(new Error('ACCOUNT_INACTIVE'), { status: 403 });
+      }
+      if (dbUser.role !== 'PLATFORM_ADMIN' && !dbUser.organisation?.isActive) {
+        throw Object.assign(new Error('ORG_INACTIVE'), { status: 403 });
       }
 
       (req as any).ctx = {

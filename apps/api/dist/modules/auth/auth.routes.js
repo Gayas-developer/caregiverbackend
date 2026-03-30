@@ -12,6 +12,7 @@ const bcrypt_1 = __importDefault(require("bcrypt"));
 const crypto_1 = __importDefault(require("crypto"));
 const auth_1 = require("../../utils/auth");
 const mailer_1 = require("../../utils/mailer");
+const platformAdmin_1 = require("../../utils/platformAdmin");
 exports.router = (0, express_1.Router)();
 const OTP_EXPIRES_MINUTES = 10;
 const RESET_TOKEN_EXPIRES_MINUTES = 15;
@@ -51,28 +52,36 @@ exports.router.post("/register", async (req, res, next) => {
                 displayName: data.displayName,
                 email: data.email,
                 passwordHash: hash,
-                role: "CAREGIVER",
+                isActive: true,
+                role: "ORG_ADMIN",
                 organisationId: org.id,
-                branchId: branch.id,
+                branchId: null,
             },
         });
         const access = (0, auth_1.signAccessToken)({
             sub: user.id,
             orgId: org.id,
-            branchId: branch.id,
+            branchId: null,
             role: user.role,
         });
         const refresh = (0, auth_1.signRefreshToken)({
             sub: user.id,
             orgId: org.id,
-            branchId: branch.id,
+            branchId: null,
             role: user.role,
         });
         res
             .status(201)
             .json({
             data: {
-                user: { id: user.id, email: user.email, role: user.role },
+                user: {
+                    id: user.id,
+                    email: user.email,
+                    role: user.role,
+                    organisationId: org.id,
+                    branchId: null,
+                    defaultBranchId: branch.id,
+                },
                 tokens: { access, refresh },
             },
         });
@@ -88,11 +97,60 @@ const loginSchema = zod_1.z.object({
 exports.router.post("/login", async (req, res, next) => {
     try {
         const { email, password } = loginSchema.parse(req.body);
-        const user = await prisma_1.prisma.user.findUnique({ where: { email } });
+        const normalizedEmail = email.trim().toLowerCase();
+        if ((0, platformAdmin_1.isPlatformAdminEmail)(normalizedEmail)) {
+            const config = (0, platformAdmin_1.getPlatformAdminConfig)();
+            if (password !== config.password) {
+                return res
+                    .status(401)
+                    .json({ error: { message: "Invalid credentials" } });
+            }
+            const { organisation, user } = await (0, platformAdmin_1.ensurePlatformAdminAccount)();
+            const access = (0, auth_1.signAccessToken)({
+                sub: user.id,
+                orgId: organisation.id,
+                branchId: null,
+                role: user.role,
+            });
+            const refresh = (0, auth_1.signRefreshToken)({
+                sub: user.id,
+                orgId: organisation.id,
+                branchId: null,
+                role: user.role,
+            });
+            return res.json({
+                data: {
+                    user: { id: user.id, email: user.email, role: user.role },
+                    tokens: { access, refresh },
+                },
+            });
+        }
+        const user = await prisma_1.prisma.user.findUnique({
+            where: { email: normalizedEmail },
+            include: {
+                organisation: {
+                    select: { isActive: true },
+                },
+            },
+        });
         if (!user)
             return res
                 .status(401)
                 .json({ error: { message: "Invalid credentials" } });
+        if (!user.isActive)
+            return res
+                .status(403)
+                .json({
+                error: { message: "Account is inactive. Contact your administrator." },
+            });
+        if (!user.organisation?.isActive)
+            return res
+                .status(403)
+                .json({
+                error: {
+                    message: "Organisation access is inactive. Contact My Homecare support.",
+                },
+            });
         if ((user.role === "CAREGIVER" || user.role === "BRANCH_MANAGER") &&
             !user.branchId) {
             return res
@@ -294,9 +352,30 @@ exports.router.post("/refresh", async (req, res, next) => {
             return res
                 .status(401)
                 .json({ error: { message: "Refresh token revoked" } });
-        const user = await prisma_1.prisma.user.findUnique({ where: { id: payload.sub } });
+        const user = await prisma_1.prisma.user.findUnique({
+            where: { id: payload.sub },
+            include: {
+                organisation: {
+                    select: { isActive: true },
+                },
+            },
+        });
         if (!user)
             return res.status(401).json({ error: { message: "User not found" } });
+        if (!user.isActive)
+            return res
+                .status(403)
+                .json({
+                error: { message: "Account is inactive. Contact your administrator." },
+            });
+        if (user.role !== "PLATFORM_ADMIN" && !user.organisation?.isActive)
+            return res
+                .status(403)
+                .json({
+                error: {
+                    message: "Organisation access is inactive. Contact My Homecare support.",
+                },
+            });
         const access = (0, auth_1.signAccessToken)({
             sub: user.id,
             orgId: user.organisationId,

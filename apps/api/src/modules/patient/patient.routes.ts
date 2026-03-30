@@ -101,9 +101,14 @@ router.get('/', authenticate, tenantScope, async (req, res, next) => {
   try {
     const ctx = (req as any).ctx as { orgId: string; branchId: string | null; role: string };
     const branchIdParam = req.query.branchId as string | undefined;
+    const roleCanViewOrgWide =
+      ctx.role === 'ORG_ADMIN' || ctx.role === 'CLINICAL_REVIEWER';
 
     // Caregiver + branch roles: hard lock
-    if (ctx.role !== 'ORG_ADMIN') {
+    if (!roleCanViewOrgWide) {
+      if (!ctx.branchId) {
+        return res.status(403).json({ error: { message: 'Branch context missing. Please contact admin.' } });
+      }
       const list = await prisma.patient.findMany({
         where: { branchId: ctx.branchId! },
         take: 50,
@@ -112,7 +117,7 @@ router.get('/', authenticate, tenantScope, async (req, res, next) => {
       return res.json({ data: list });
     }
 
-    // ORG_ADMIN: optional branch filter, but validate org ownership
+    // ORG_ADMIN / org-wide reviewer: optional branch filter, but validate org ownership
     if (branchIdParam) {
       const branch = await prisma.branch.findFirst({
         where: { id: branchIdParam, organisationId: ctx.orgId },
@@ -122,6 +127,15 @@ router.get('/', authenticate, tenantScope, async (req, res, next) => {
 
       const list = await prisma.patient.findMany({
         where: { branchId: branch.id },
+        take: 50,
+        orderBy: { createdAt: 'desc' },
+      });
+      return res.json({ data: list });
+    }
+
+    if (ctx.role === 'CLINICAL_REVIEWER' && ctx.branchId) {
+      const list = await prisma.patient.findMany({
+        where: { branchId: ctx.branchId },
         take: 50,
         orderBy: { createdAt: 'desc' },
       });

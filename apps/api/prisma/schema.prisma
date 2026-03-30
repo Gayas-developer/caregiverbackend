@@ -8,6 +8,7 @@ datasource db {
 }
 
 enum Role {
+  PLATFORM_ADMIN
   ORG_ADMIN
   BRANCH_MANAGER
   CLINICAL_REVIEWER
@@ -29,6 +30,7 @@ model Organisation {
   id        String   @id @default(cuid())
   name      String
   slug      String   @unique
+  isActive  Boolean  @default(true)
   branches  Branch[]
   users     User[]
   createdAt DateTime @default(now())
@@ -51,6 +53,7 @@ model User {
   avatarUrl      String?
   email          String       @unique
   passwordHash   String
+  isActive       Boolean      @default(true)
   role           Role
   organisationId String
   branchId       String?

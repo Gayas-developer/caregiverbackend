@@ -17,15 +17,8 @@ exports.router.get('/', auth_1.authenticate, auth_1.tenantScope, async (req, res
         const ctx = req.ctx;
         const q = listSchema.parse(req.query);
         let allowedBranchIds = [];
-        if (ctx.role !== 'ORG_ADMIN') {
-            if (!ctx.branchId) {
-                return res.status(403).json({
-                    error: { message: 'Branch context missing. Please contact admin.' },
-                });
-            }
-            allowedBranchIds = [ctx.branchId];
-        }
-        else if (q.branchId) {
+        const roleCanViewOrgWide = ctx.role === 'ORG_ADMIN' || ctx.role === 'CLINICAL_REVIEWER';
+        if (q.branchId) {
             const branch = await prisma_1.prisma.branch.findUnique({ where: { id: q.branchId } });
             if (!branch || branch.organisationId !== ctx.orgId) {
                 return res
@@ -33,6 +26,17 @@ exports.router.get('/', auth_1.authenticate, auth_1.tenantScope, async (req, res
                     .json({ error: { message: 'Branch is not in your organisation' } });
             }
             allowedBranchIds = [q.branchId];
+        }
+        else if (!roleCanViewOrgWide) {
+            if (!ctx.branchId) {
+                return res.status(403).json({
+                    error: { message: 'Branch context missing. Please contact admin.' },
+                });
+            }
+            allowedBranchIds = [ctx.branchId];
+        }
+        else if (ctx.role === 'CLINICAL_REVIEWER' && ctx.branchId) {
+            allowedBranchIds = [ctx.branchId];
         }
         else {
             const branches = await prisma_1.prisma.branch.findMany({
@@ -111,7 +115,7 @@ const addActionSchema = zod_1.z.object({
     action: zod_1.z.string().min(2).max(120),
     closeAlert: zod_1.z.boolean().optional(),
 });
-exports.router.post('/:id/actions', auth_1.authenticate, auth_1.tenantScope, (0, auth_1.requireRole)('ORG_ADMIN', 'BRANCH_MANAGER', 'CAREGIVER', 'CLINICAL_REVIEWER'), async (req, res, next) => {
+exports.router.post('/:id/actions', auth_1.authenticate, auth_1.tenantScope, (0, auth_1.requireRole)('PLATFORM_ADMIN', 'ORG_ADMIN', 'BRANCH_MANAGER', 'CAREGIVER', 'CLINICAL_REVIEWER'), async (req, res, next) => {
     try {
         const id = zod_1.z.string().parse(req.params.id);
         const data = addActionSchema.parse(req.body);
@@ -124,15 +128,23 @@ exports.router.post('/:id/actions', auth_1.authenticate, auth_1.tenantScope, (0,
             where: { id: alert.branchId },
             select: { id: true, organisationId: true },
         });
-        if (!branch || branch.organisationId !== ctx.orgId) {
+        if (ctx.role !== 'PLATFORM_ADMIN' && (!branch || branch.organisationId !== ctx.orgId)) {
             return res
                 .status(403)
                 .json({ error: { message: 'Alert is not in your organisation' } });
         }
-        if (ctx.role !== 'ORG_ADMIN' && ctx.branchId && ctx.branchId !== alert.branchId) {
+        if (ctx.role !== 'PLATFORM_ADMIN' &&
+            ctx.role !== 'ORG_ADMIN' &&
+            ctx.branchId &&
+            ctx.branchId !== alert.branchId) {
             return res
                 .status(403)
                 .json({ error: { message: 'You can only manage alerts in your branch' } });
+        }
+        if (ctx.role === 'CAREGIVER' && data.closeAlert) {
+            return res
+                .status(403)
+                .json({ error: { message: 'Caregivers can escalate alerts but cannot resolve them' } });
         }
         const result = await prisma_1.prisma.$transaction(async (tx) => {
             const action = await tx.escalationAction.create({

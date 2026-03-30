@@ -15,6 +15,7 @@ const threshold_routes_1 = require("./modules/thresholds/threshold.routes");
 const report_routes_1 = require("./modules/reports/report.routes");
 const visit_routes_1 = require("./modules/visits/visit.routes");
 const alert_routes_1 = require("./modules/alerts/alert.routes");
+const platform_routes_1 = require("./modules/platform/platform.routes");
 const error_1 = require("./utils/error");
 const swagger_1 = require("./swagger");
 const audit_1 = require("./middleware/audit");
@@ -40,6 +41,7 @@ function createServer() {
     app.use('/v1/thresholds', threshold_routes_1.router);
     app.use('/v1/reports', report_routes_1.router);
     app.use('/v1/profile', profile_routes_1.router);
+    app.use('/v1/platform', platform_routes_1.router);
     app.use(error_1.errorHandler);
     return app;
 }

@@ -135,22 +135,28 @@ router.get('/', authenticate, tenantScope, async (req, res, next) => {
     const q = listSchema.parse(req.query);
 
     let branchId: string | undefined;
-    if (ctx.role !== 'ORG_ADMIN') {
+    const roleCanViewOrgWide =
+      ctx.role === 'ORG_ADMIN' || ctx.role === 'CLINICAL_REVIEWER';
+
+    if (q.branchId) {
+      branchId = q.branchId;
+    } else if (!roleCanViewOrgWide) {
       if (!ctx.branchId) {
         return res.status(403).json({ error: { message: 'Branch context missing. Please contact admin.' } });
       }
       branchId = ctx.branchId;
-    } else if (q.branchId) {
-      branchId = q.branchId;
+    } else if (ctx.role === 'CLINICAL_REVIEWER' && ctx.branchId) {
+      branchId = ctx.branchId;
     }
 
-    if (branchId && ctx.role === 'ORG_ADMIN') {
+    if (branchId && roleCanViewOrgWide) {
       const branch = await prisma.branch.findUnique({ where: { id: branchId } });
       if (!branch || branch.organisationId !== ctx.orgId) return res.status(403).json({ error: { message: 'Branch is not in your organisation' } });
     }
 
     const visits = await prisma.visit.findMany({
       where: {
+        branch: { organisationId: ctx.orgId },
         ...(branchId ? { branchId } : {}),
         ...(q.patientId ? { patientId: q.patientId } : {}),
         ...(q.status ? { status: q.status } : {}),

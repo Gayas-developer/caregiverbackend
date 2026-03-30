@@ -9,6 +9,7 @@ import { router as thresholds } from './modules/thresholds/threshold.routes';
 import { router as reports } from './modules/reports/report.routes';
 import { router as visits } from './modules/visits/visit.routes';
 import { router as alerts } from './modules/alerts/alert.routes';
+import { router as platform } from './modules/platform/platform.routes';
 import { errorHandler } from './utils/error';
 import { docs } from './swagger';
 import { audit } from './middleware/audit';
@@ -40,6 +41,7 @@ export function createServer() {
   app.use('/v1/thresholds', thresholds);
   app.use('/v1/reports', reports);
   app.use('/v1/profile', profile);
+  app.use('/v1/platform', platform);
 
   app.use(errorHandler);
   return app;

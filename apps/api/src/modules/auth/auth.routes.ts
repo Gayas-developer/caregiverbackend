@@ -11,6 +11,11 @@ import {
   verifyRefreshToken,
 } from "../../utils/auth";
 import { sendPasswordResetOtpEmail } from "../../utils/mailer";
+import {
+  ensurePlatformAdminAccount,
+  getPlatformAdminConfig,
+  isPlatformAdminEmail,
+} from "../../utils/platformAdmin";
 
 export const router = Router();
 
@@ -57,29 +62,37 @@ router.post("/register", async (req, res, next) => {
         displayName: data.displayName,
         email: data.email,
         passwordHash: hash,
-        role: "CAREGIVER",
+        isActive: true,
+        role: "ORG_ADMIN",
         organisationId: org.id,
-        branchId: branch.id,
+        branchId: null,
       },
     });
 
     const access = signAccessToken({
       sub: user.id,
       orgId: org.id,
-      branchId: branch.id,
+      branchId: null,
       role: user.role,
     });
     const refresh = signRefreshToken({
       sub: user.id,
       orgId: org.id,
-      branchId: branch.id,
+      branchId: null,
       role: user.role,
     });
     res
       .status(201)
       .json({
         data: {
-          user: { id: user.id, email: user.email, role: user.role },
+          user: {
+            id: user.id,
+            email: user.email,
+            role: user.role,
+            organisationId: org.id,
+            branchId: null,
+            defaultBranchId: branch.id,
+          },
           tokens: { access, refresh },
         },
       });
@@ -95,11 +108,64 @@ const loginSchema = z.object({
 router.post("/login", async (req, res, next) => {
   try {
     const { email, password } = loginSchema.parse(req.body);
-    const user = await prisma.user.findUnique({ where: { email } });
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (isPlatformAdminEmail(normalizedEmail)) {
+      const config = getPlatformAdminConfig();
+      if (password !== config.password) {
+        return res
+          .status(401)
+          .json({ error: { message: "Invalid credentials" } });
+      }
+
+      const { organisation, user } = await ensurePlatformAdminAccount();
+      const access = signAccessToken({
+        sub: user.id,
+        orgId: organisation.id,
+        branchId: null,
+        role: user.role,
+      });
+      const refresh = signRefreshToken({
+        sub: user.id,
+        orgId: organisation.id,
+        branchId: null,
+        role: user.role,
+      });
+
+      return res.json({
+        data: {
+          user: { id: user.id, email: user.email, role: user.role },
+          tokens: { access, refresh },
+        },
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      include: {
+        organisation: {
+          select: { isActive: true },
+        },
+      },
+    });
     if (!user)
       return res
         .status(401)
         .json({ error: { message: "Invalid credentials" } });
+    if (!user.isActive)
+      return res
+        .status(403)
+        .json({
+          error: { message: "Account is inactive. Contact your administrator." },
+        });
+    if (!user.organisation?.isActive)
+      return res
+        .status(403)
+        .json({
+          error: {
+            message: "Organisation access is inactive. Contact My Homecare support.",
+          },
+        });
     if (
       (user.role === "CAREGIVER" || user.role === "BRANCH_MANAGER") &&
       !user.branchId
@@ -332,9 +398,30 @@ router.post("/refresh", async (req, res, next) => {
         .status(401)
         .json({ error: { message: "Refresh token revoked" } });
 
-    const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+    const user = await prisma.user.findUnique({
+      where: { id: payload.sub },
+      include: {
+        organisation: {
+          select: { isActive: true },
+        },
+      },
+    });
     if (!user)
       return res.status(401).json({ error: { message: "User not found" } });
+    if (!user.isActive)
+      return res
+        .status(403)
+        .json({
+          error: { message: "Account is inactive. Contact your administrator." },
+        });
+    if (user.role !== "PLATFORM_ADMIN" && !user.organisation?.isActive)
+      return res
+        .status(403)
+        .json({
+          error: {
+            message: "Organisation access is inactive. Contact My Homecare support.",
+          },
+        });
 
     const access = signAccessToken({
       sub: user.id,
