@@ -27,6 +27,11 @@ exports.router.post('/', auth_1.authenticate, auth_1.tenantScope, (0, auth_1.req
         });
         if (!patient)
             return res.status(404).json({ error: { message: 'Patient not found' } });
+        if (patient.archivedAt) {
+            return res.status(409).json({
+                error: { message: 'This patient has been archived and cannot start a new visit.' },
+            });
+        }
         if (patient.branch.organisationId !== ctx.orgId)
             return res.status(403).json({ error: { message: 'Patient is not in your organisation' } });
         if (ctx.role === 'CAREGIVER' || ctx.role === 'BRANCH_MANAGER') {

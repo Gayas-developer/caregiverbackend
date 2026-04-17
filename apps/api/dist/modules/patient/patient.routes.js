@@ -13,6 +13,9 @@ const createPatientSchema = zod_1.z.object({
     lastName: zod_1.z.string().min(1),
     dob: zod_1.z.string().optional(),
 });
+const archivePatientSchema = zod_1.z.object({
+    archived: zod_1.z.boolean().default(true),
+});
 exports.router.post('/', auth_1.authenticate, auth_1.tenantScope, (0, auth_1.requireRole)('ORG_ADMIN', 'BRANCH_MANAGER', 'CAREGIVER'), async (req, res, next) => {
     try {
         const data = createPatientSchema.parse(req.body);
@@ -45,6 +48,7 @@ exports.router.post('/', auth_1.authenticate, auth_1.tenantScope, (0, auth_1.req
                     lastName: data.lastName,
                     dob: data.dob ? new Date(data.dob) : null,
                     branchId: branch.id,
+                    archivedAt: null,
                 },
             });
         });
@@ -88,7 +92,7 @@ exports.router.get('/', auth_1.authenticate, auth_1.tenantScope, async (req, res
                 return res.status(403).json({ error: { message: 'Branch context missing. Please contact admin.' } });
             }
             const list = await prisma_1.prisma.patient.findMany({
-                where: { branchId: ctx.branchId },
+                where: { branchId: ctx.branchId, archivedAt: null },
                 take: 50,
                 orderBy: { createdAt: 'desc' },
             });
@@ -103,7 +107,7 @@ exports.router.get('/', auth_1.authenticate, auth_1.tenantScope, async (req, res
             if (!branch)
                 return res.status(403).json({ error: { message: 'Branch not in your organisation' } });
             const list = await prisma_1.prisma.patient.findMany({
-                where: { branchId: branch.id },
+                where: { branchId: branch.id, archivedAt: null },
                 take: 50,
                 orderBy: { createdAt: 'desc' },
             });
@@ -111,7 +115,7 @@ exports.router.get('/', auth_1.authenticate, auth_1.tenantScope, async (req, res
         }
         if (ctx.role === 'CLINICAL_REVIEWER' && ctx.branchId) {
             const list = await prisma_1.prisma.patient.findMany({
-                where: { branchId: ctx.branchId },
+                where: { branchId: ctx.branchId, archivedAt: null },
                 take: 50,
                 orderBy: { createdAt: 'desc' },
             });
@@ -119,11 +123,67 @@ exports.router.get('/', auth_1.authenticate, auth_1.tenantScope, async (req, res
         }
         // ORG_ADMIN default: org-wide
         const list = await prisma_1.prisma.patient.findMany({
-            where: { branch: { organisationId: ctx.orgId } },
+            where: { branch: { organisationId: ctx.orgId }, archivedAt: null },
             take: 50,
             orderBy: { createdAt: 'desc' },
         });
         res.json({ data: list });
+    }
+    catch (e) {
+        next(e);
+    }
+});
+exports.router.patch('/:id/archive', auth_1.authenticate, auth_1.tenantScope, (0, auth_1.requireRole)('ORG_ADMIN', 'BRANCH_MANAGER'), async (req, res, next) => {
+    try {
+        const id = zod_1.z.string().parse(req.params.id);
+        const data = archivePatientSchema.parse(req.body ?? {});
+        const ctx = req.ctx;
+        const user = req.user;
+        const patient = await prisma_1.prisma.patient.findFirst({
+            where: {
+                id,
+                branch: { organisationId: ctx.orgId },
+            },
+            include: {
+                branch: { select: { id: true, name: true } },
+                visits: {
+                    where: { status: 'OPEN' },
+                    select: { id: true },
+                    take: 1,
+                },
+            },
+        });
+        if (!patient) {
+            return res.status(404).json({ error: { message: 'Patient not found' } });
+        }
+        if (ctx.role === 'BRANCH_MANAGER') {
+            if (!ctx.branchId || patient.branchId !== ctx.branchId) {
+                return res
+                    .status(403)
+                    .json({ error: { message: 'You can only manage patients in your branch.' } });
+            }
+        }
+        if (patient.visits.length && data.archived) {
+            return res.status(409).json({
+                error: { message: 'Close the open visit before archiving this patient.' },
+            });
+        }
+        const archivedAt = data.archived ? new Date() : null;
+        const updated = await prisma_1.prisma.patient.update({
+            where: { id: patient.id },
+            data: { archivedAt },
+        });
+        (0, hub_1.publishOrgEvent)(ctx.orgId, data.archived ? 'PATIENT_ARCHIVED' : 'PATIENT_RESTORED', {
+            patient: {
+                id: updated.id,
+                firstName: updated.firstName,
+                lastName: updated.lastName,
+                branchId: updated.branchId,
+                archivedAt: updated.archivedAt,
+            },
+            actorId: user.sub,
+        }, { branchId: updated.branchId });
+        res.json({ data: updated });
     }
     catch (e) {
         next(e);

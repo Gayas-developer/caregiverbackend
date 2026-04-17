@@ -13,6 +13,10 @@ const createPatientSchema = z.object({
   dob: z.string().optional(),
 });
 
+const archivePatientSchema = z.object({
+  archived: z.boolean().default(true),
+});
+
 
 router.post(
   '/',
@@ -55,6 +59,7 @@ router.post(
             lastName: data.lastName,
             dob: data.dob ? new Date(data.dob) : null,
             branchId: branch.id,
+            archivedAt: null,
           },
         });
       });
@@ -110,7 +115,7 @@ router.get('/', authenticate, tenantScope, async (req, res, next) => {
         return res.status(403).json({ error: { message: 'Branch context missing. Please contact admin.' } });
       }
       const list = await prisma.patient.findMany({
-        where: { branchId: ctx.branchId! },
+        where: { branchId: ctx.branchId!, archivedAt: null },
         take: 50,
         orderBy: { createdAt: 'desc' },
       });
@@ -126,7 +131,7 @@ router.get('/', authenticate, tenantScope, async (req, res, next) => {
       if (!branch) return res.status(403).json({ error: { message: 'Branch not in your organisation' } });
 
       const list = await prisma.patient.findMany({
-        where: { branchId: branch.id },
+        where: { branchId: branch.id, archivedAt: null },
         take: 50,
         orderBy: { createdAt: 'desc' },
       });
@@ -135,7 +140,7 @@ router.get('/', authenticate, tenantScope, async (req, res, next) => {
 
     if (ctx.role === 'CLINICAL_REVIEWER' && ctx.branchId) {
       const list = await prisma.patient.findMany({
-        where: { branchId: ctx.branchId },
+        where: { branchId: ctx.branchId, archivedAt: null },
         take: 50,
         orderBy: { createdAt: 'desc' },
       });
@@ -144,7 +149,7 @@ router.get('/', authenticate, tenantScope, async (req, res, next) => {
 
     // ORG_ADMIN default: org-wide
     const list = await prisma.patient.findMany({
-      where: { branch: { organisationId: ctx.orgId } },
+      where: { branch: { organisationId: ctx.orgId }, archivedAt: null },
       take: 50,
       orderBy: { createdAt: 'desc' },
     });
@@ -152,3 +157,81 @@ router.get('/', authenticate, tenantScope, async (req, res, next) => {
     res.json({ data: list });
   } catch (e) { next(e); }
 });
+
+router.patch(
+  '/:id/archive',
+  authenticate,
+  tenantScope,
+  requireRole('ORG_ADMIN', 'BRANCH_MANAGER'),
+  async (req, res, next) => {
+    try {
+      const id = z.string().parse(req.params.id);
+      const data = archivePatientSchema.parse(req.body ?? {});
+      const ctx = (req as any).ctx as {
+        orgId: string;
+        branchId: string | null;
+        role: string;
+      };
+      const user = (req as any).user as { sub: string };
+
+      const patient = await prisma.patient.findFirst({
+        where: {
+          id,
+          branch: { organisationId: ctx.orgId },
+        },
+        include: {
+          branch: { select: { id: true, name: true } },
+          visits: {
+            where: { status: 'OPEN' },
+            select: { id: true },
+            take: 1,
+          },
+        },
+      });
+
+      if (!patient) {
+        return res.status(404).json({ error: { message: 'Patient not found' } });
+      }
+
+      if (ctx.role === 'BRANCH_MANAGER') {
+        if (!ctx.branchId || patient.branchId !== ctx.branchId) {
+          return res
+            .status(403)
+            .json({ error: { message: 'You can only manage patients in your branch.' } });
+        }
+      }
+
+      if (patient.visits.length && data.archived) {
+        return res.status(409).json({
+          error: { message: 'Close the open visit before archiving this patient.' },
+        });
+      }
+
+      const archivedAt = data.archived ? new Date() : null;
+      const updated = await prisma.patient.update({
+        where: { id: patient.id },
+        data: { archivedAt },
+      });
+
+      publishOrgEvent(
+        ctx.orgId,
+        data.archived ? 'PATIENT_ARCHIVED' : 'PATIENT_RESTORED',
+        {
+          patient: {
+            id: updated.id,
+            firstName: updated.firstName,
+            lastName: updated.lastName,
+            branchId: updated.branchId,
+            archivedAt: updated.archivedAt,
+          },
+          actorId: user.sub,
+        },
+        { branchId: updated.branchId },
+      );
+
+      res.json({ data: updated });
+    } catch (e) {
+      next(e);
+    }
+  },
+);

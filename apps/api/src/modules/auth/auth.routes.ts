@@ -1,21 +1,21 @@
-import jwt from "jsonwebtoken";
-import { Router } from "express";
-import { prisma } from "../../utils/prisma";
-import { z } from "zod";
-import bcrypt from "bcrypt";
-import crypto from "crypto";
+import jwt from 'jsonwebtoken';
+import { Router } from 'express';
+import { prisma } from '../../utils/prisma';
+import { z } from 'zod';
+import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 import {
   authenticate,
   signAccessToken,
   signRefreshToken,
   verifyRefreshToken,
-} from "../../utils/auth";
-import { sendPasswordResetOtpEmail } from "../../utils/mailer";
+} from '../../utils/auth';
+import { sendPasswordResetOtpEmail } from '../../utils/mailer';
 import {
   ensurePlatformAdminAccount,
   getPlatformAdminConfig,
   isPlatformAdminEmail,
-} from "../../utils/platformAdmin";
+} from '../../utils/platformAdmin';
 
 export const router = Router();
 
@@ -30,7 +30,7 @@ const registerSchema = z.object({
   branch: z.object({ name: z.string().min(2) }).optional(),
 });
 
-router.post("/register", async (req, res, next) => {
+router.post('/register', async (req, res, next) => {
   try {
     const data = registerSchema.parse(req.body);
     const exists = await prisma.user.findUnique({
@@ -39,7 +39,7 @@ router.post("/register", async (req, res, next) => {
     if (exists)
       return res
         .status(409)
-        .json({ error: { message: "Email already exists" } });
+        .json({ error: { message: 'Email already exists' } });
 
     const slugExists = await prisma.organisation.findUnique({
       where: { slug: data.organisation.slug },
@@ -47,7 +47,7 @@ router.post("/register", async (req, res, next) => {
     if (slugExists)
       return res
         .status(409)
-        .json({ error: { message: "Organisation slug already exists" } });
+        .json({ error: { message: 'Organisation slug already exists' } });
 
     const hash = await bcrypt.hash(data.password, 10);
 
@@ -55,7 +55,7 @@ router.post("/register", async (req, res, next) => {
       data: { name: data.organisation.name, slug: data.organisation.slug },
     });
     const branch = await prisma.branch.create({
-      data: { name: data.branch?.name || "Main", organisationId: org.id },
+      data: { name: data.branch?.name || 'Main', organisationId: org.id },
     });
     const user = await prisma.user.create({
       data: {
@@ -63,7 +63,7 @@ router.post("/register", async (req, res, next) => {
         email: data.email,
         passwordHash: hash,
         isActive: true,
-        role: "ORG_ADMIN",
+        role: 'ORG_ADMIN',
         organisationId: org.id,
         branchId: null,
       },
@@ -81,21 +81,19 @@ router.post("/register", async (req, res, next) => {
       branchId: null,
       role: user.role,
     });
-    res
-      .status(201)
-      .json({
-        data: {
-          user: {
-            id: user.id,
-            email: user.email,
-            role: user.role,
-            organisationId: org.id,
-            branchId: null,
-            defaultBranchId: branch.id,
-          },
-          tokens: { access, refresh },
+    res.status(201).json({
+      data: {
+        user: {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          organisationId: org.id,
+          branchId: null,
+          defaultBranchId: branch.id,
         },
-      });
+        tokens: { access, refresh },
+      },
+    });
   } catch (e) {
     next(e);
   }
@@ -105,7 +103,7 @@ const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
 });
-router.post("/login", async (req, res, next) => {
+router.post('/login', async (req, res, next) => {
   try {
     const { email, password } = loginSchema.parse(req.body);
     const normalizedEmail = email.trim().toLowerCase();
@@ -115,7 +113,7 @@ router.post("/login", async (req, res, next) => {
       if (password !== config.password) {
         return res
           .status(401)
-          .json({ error: { message: "Invalid credentials" } });
+          .json({ error: { message: 'Invalid credentials' } });
       }
 
       const { organisation, user } = await ensurePlatformAdminAccount();
@@ -151,34 +149,31 @@ router.post("/login", async (req, res, next) => {
     if (!user)
       return res
         .status(401)
-        .json({ error: { message: "Invalid credentials" } });
+        .json({ error: { message: 'Invalid credentials' } });
     if (!user.isActive)
-      return res
-        .status(403)
-        .json({
-          error: { message: "Account is inactive. Contact your administrator." },
-        });
+      return res.status(403).json({
+        error: { message: 'Account is inactive. Contact your administrator.' },
+      });
     if (!user.organisation?.isActive)
-      return res
-        .status(403)
-        .json({
-          error: {
-            message: "Organisation access is inactive. Contact My Homecare support.",
-          },
-        });
+      return res.status(403).json({
+        error: {
+          message:
+            'Organisation access is inactive. Contact My Homecare support.',
+        },
+      });
     if (
-      (user.role === "CAREGIVER" || user.role === "BRANCH_MANAGER") &&
+      (user.role === 'CAREGIVER' || user.role === 'BRANCH_MANAGER') &&
       !user.branchId
     ) {
       return res
         .status(403)
-        .json({ error: { message: "User is not assigned to a branch" } });
+        .json({ error: { message: 'User is not assigned to a branch' } });
     }
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok)
       return res
         .status(401)
-        .json({ error: { message: "Invalid credentials" } });
+        .json({ error: { message: 'Invalid credentials' } });
 
     const access = signAccessToken({
       sub: user.id,
@@ -207,7 +202,7 @@ const forgotPasswordSchema = z.object({
   email: z.string().email(),
 });
 
-router.post("/forgot-password", async (req, res, next) => {
+router.post('/forgot-password', async (req, res, next) => {
   try {
     const { email } = forgotPasswordSchema.parse(req.body);
     const user = await prisma.user.findUnique({ where: { email } });
@@ -215,15 +210,13 @@ router.post("/forgot-password", async (req, res, next) => {
     // Always return a generic success message to avoid account enumeration.
     if (!user) {
       return res.json({
-        data: { message: "If an account exists, an OTP has been sent." },
+        data: { message: 'If an account exists, an OTP has been sent.' },
       });
     }
 
     const otp = String(Math.floor(100000 + Math.random() * 900000));
     const otpHash = await bcrypt.hash(otp, 10);
-    const otpExpiresAt = new Date(
-      Date.now() + OTP_EXPIRES_MINUTES * 60 * 1000,
-    );
+    const otpExpiresAt = new Date(Date.now() + OTP_EXPIRES_MINUTES * 60 * 1000);
 
     await prisma.passwordReset.upsert({
       where: { userId: user.id },
@@ -246,7 +239,7 @@ router.post("/forgot-password", async (req, res, next) => {
     await sendPasswordResetOtpEmail({ to: email, otp });
 
     res.json({
-      data: { message: "If an account exists, an OTP has been sent." },
+      data: { message: 'If an account exists, an OTP has been sent.' },
     });
   } catch (e) {
     next(e);
@@ -255,29 +248,30 @@ router.post("/forgot-password", async (req, res, next) => {
 
 const verifyResetOtpSchema = z.object({
   email: z.string().email(),
-  otp: z.string().regex(/^\d{6}$/, "OTP must be 6 digits"),
+  otp: z.string().regex(/^\d{6}$/, 'OTP must be 6 digits'),
 });
 
-router.post("/verify-reset-otp", async (req, res, next) => {
+router.post('/verify-reset-otp', async (req, res, next) => {
   try {
     const { email, otp } = verifyResetOtpSchema.parse(req.body);
     const user = await prisma.user.findUnique({ where: { email } });
+
     if (!user) {
-      return res.status(400).json({ error: { message: "Invalid OTP" } });
+      return res.status(400).json({ error: { message: 'Invalid OTP' } });
     }
 
     const reset = await prisma.passwordReset.findUnique({
       where: { userId: user.id },
     });
     if (!reset || reset.consumedAt) {
-      return res.status(400).json({ error: { message: "Invalid OTP" } });
+      return res.status(400).json({ error: { message: 'Invalid OTP' } });
     }
     if (reset.otpExpiresAt.getTime() < Date.now()) {
-      return res.status(400).json({ error: { message: "OTP expired" } });
+      return res.status(400).json({ error: { message: 'OTP expired' } });
     }
     if (reset.attempts >= 5) {
       return res.status(429).json({
-        error: { message: "Too many failed attempts. Request a new OTP." },
+        error: { message: 'Too many failed attempts. Request a new OTP.' },
       });
     }
 
@@ -287,14 +281,14 @@ router.post("/verify-reset-otp", async (req, res, next) => {
         where: { userId: user.id },
         data: { attempts: { increment: 1 } },
       });
-      return res.status(400).json({ error: { message: "Invalid OTP" } });
+      return res.status(400).json({ error: { message: 'Invalid OTP' } });
     }
 
-    const resetToken = crypto.randomBytes(32).toString("hex");
+    const resetToken = crypto.randomBytes(32).toString('hex');
     const resetTokenHash = crypto
-      .createHash("sha256")
+      .createHash('sha256')
       .update(resetToken)
-      .digest("hex");
+      .digest('hex');
 
     await prisma.passwordReset.update({
       where: { userId: user.id },
@@ -325,14 +319,16 @@ const resetPasswordSchema = z.object({
   newPassword: z.string().min(6),
 });
 
-router.post("/reset-password", async (req, res, next) => {
+router.post('/reset-password', async (req, res, next) => {
   try {
     const { email, resetToken, newPassword } = resetPasswordSchema.parse(
       req.body,
     );
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
-      return res.status(400).json({ error: { message: "Invalid reset token" } });
+      return res
+        .status(400)
+        .json({ error: { message: 'Invalid reset token' } });
     }
 
     const reset = await prisma.passwordReset.findUnique({
@@ -344,20 +340,24 @@ router.post("/reset-password", async (req, res, next) => {
       !reset.resetTokenHash ||
       !reset.resetTokenExpiresAt
     ) {
-      return res.status(400).json({ error: { message: "Invalid reset token" } });
+      return res
+        .status(400)
+        .json({ error: { message: 'Invalid reset token' } });
     }
     if (reset.resetTokenExpiresAt.getTime() < Date.now()) {
       return res
         .status(400)
-        .json({ error: { message: "Reset token expired" } });
+        .json({ error: { message: 'Reset token expired' } });
     }
 
     const providedHash = crypto
-      .createHash("sha256")
+      .createHash('sha256')
       .update(resetToken)
-      .digest("hex");
+      .digest('hex');
     if (providedHash !== reset.resetTokenHash) {
-      return res.status(400).json({ error: { message: "Invalid reset token" } });
+      return res
+        .status(400)
+        .json({ error: { message: 'Invalid reset token' } });
     }
 
     const passwordHash = await bcrypt.hash(newPassword, 10);
@@ -377,13 +377,13 @@ router.post("/reset-password", async (req, res, next) => {
       }),
     ]);
 
-    res.json({ data: { message: "Password reset successful" } });
+    res.json({ data: { message: 'Password reset successful' } });
   } catch (e) {
     next(e);
   }
 });
 
-router.post("/refresh", async (req, res, next) => {
+router.post('/refresh', async (req, res, next) => {
   try {
     const { refresh } = z
       .object({ refresh: z.string().min(1) })
@@ -396,7 +396,7 @@ router.post("/refresh", async (req, res, next) => {
     if (revoked)
       return res
         .status(401)
-        .json({ error: { message: "Refresh token revoked" } });
+        .json({ error: { message: 'Refresh token revoked' } });
 
     const user = await prisma.user.findUnique({
       where: { id: payload.sub },
@@ -407,21 +407,18 @@ router.post("/refresh", async (req, res, next) => {
       },
     });
     if (!user)
-      return res.status(401).json({ error: { message: "User not found" } });
+      return res.status(401).json({ error: { message: 'User not found' } });
     if (!user.isActive)
-      return res
-        .status(403)
-        .json({
-          error: { message: "Account is inactive. Contact your administrator." },
-        });
-    if (user.role !== "PLATFORM_ADMIN" && !user.organisation?.isActive)
-      return res
-        .status(403)
-        .json({
-          error: {
-            message: "Organisation access is inactive. Contact My Homecare support.",
-          },
-        });
+      return res.status(403).json({
+        error: { message: 'Account is inactive. Contact your administrator.' },
+      });
+    if (user.role !== 'PLATFORM_ADMIN' && !user.organisation?.isActive)
+      return res.status(403).json({
+        error: {
+          message:
+            'Organisation access is inactive. Contact My Homecare support.',
+        },
+      });
 
     const access = signAccessToken({
       sub: user.id,
@@ -439,7 +436,7 @@ router.post("/refresh", async (req, res, next) => {
     await prisma.revokedToken.create({
       data: {
         jti: payload.jti,
-        type: "refresh",
+        type: 'refresh',
         expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000),
       },
     });
@@ -449,13 +446,13 @@ router.post("/refresh", async (req, res, next) => {
   }
 });
 
-router.post("/logout", async (req, res, next) => {
+router.post('/logout', async (req, res, next) => {
   try {
     const { token, type } = z
-      .object({ token: z.string().min(1), type: z.enum(["access", "refresh"]) })
+      .object({ token: z.string().min(1), type: z.enum(['access', 'refresh']) })
       .parse(req.body);
     const secret =
-      type === "refresh"
+      type === 'refresh'
         ? process.env.JWT_REFRESH_SECRET!
         : process.env.JWT_ACCESS_SECRET!;
     const payload = jwt.verify(token, secret) as any;

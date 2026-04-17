@@ -29,6 +29,11 @@ router.post('/', authenticate, tenantScope, requireRole('ORG_ADMIN','BRANCH_MANA
     });
 
     if (!patient) return res.status(404).json({ error: { message: 'Patient not found' } });
+    if (patient.archivedAt) {
+      return res.status(409).json({
+        error: { message: 'This patient has been archived and cannot start a new visit.' },
+      });
+    }
     if (patient.branch.organisationId !== ctx.orgId) return res.status(403).json({ error: { message: 'Patient is not in your organisation' } });
     if (ctx.role === 'CAREGIVER' || ctx.role === 'BRANCH_MANAGER') {
       if (!ctx.branchId) {

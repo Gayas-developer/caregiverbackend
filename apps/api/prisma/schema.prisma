@@ -89,6 +89,7 @@ model Patient {
   lastName  String
   dob       DateTime?
   createdAt DateTime       @default(now())
+  archivedAt DateTime?
   visits    Visit[]
   vitals    VitalReading[]
   consents  Consent[]

@@ -23,7 +23,7 @@ const registerSchema = zod_1.z.object({
     organisation: zod_1.z.object({ name: zod_1.z.string().min(2), slug: zod_1.z.string().min(2) }),
     branch: zod_1.z.object({ name: zod_1.z.string().min(2) }).optional(),
 });
-exports.router.post("/register", async (req, res, next) => {
+exports.router.post('/register', async (req, res, next) => {
     try {
         const data = registerSchema.parse(req.body);
         const exists = await prisma_1.prisma.user.findUnique({
@@ -32,20 +32,20 @@ exports.router.post("/register", async (req, res, next) => {
         if (exists)
             return res
                 .status(409)
-                .json({ error: { message: "Email already exists" } });
+                .json({ error: { message: 'Email already exists' } });
         const slugExists = await prisma_1.prisma.organisation.findUnique({
             where: { slug: data.organisation.slug },
         });
         if (slugExists)
             return res
                 .status(409)
-                .json({ error: { message: "Organisation slug already exists" } });
+                .json({ error: { message: 'Organisation slug already exists' } });
         const hash = await bcrypt_1.default.hash(data.password, 10);
         const org = await prisma_1.prisma.organisation.create({
             data: { name: data.organisation.name, slug: data.organisation.slug },
         });
         const branch = await prisma_1.prisma.branch.create({
-            data: { name: data.branch?.name || "Main", organisationId: org.id },
+            data: { name: data.branch?.name || 'Main', organisationId: org.id },
         });
         const user = await prisma_1.prisma.user.create({
             data: {
@@ -53,7 +53,7 @@ exports.router.post("/register", async (req, res, next) => {
                 email: data.email,
                 passwordHash: hash,
                 isActive: true,
-                role: "ORG_ADMIN",
+                role: 'ORG_ADMIN',
                 organisationId: org.id,
                 branchId: null,
             },
@@ -70,9 +70,7 @@ exports.router.post("/register", async (req, res, next) => {
             branchId: null,
             role: user.role,
         });
-        res
-            .status(201)
-            .json({
+        res.status(201).json({
             data: {
                 user: {
                     id: user.id,
@@ -94,7 +92,7 @@ const loginSchema = zod_1.z.object({
     email: zod_1.z.string().email(),
     password: zod_1.z.string().min(6),
 });
-exports.router.post("/login", async (req, res, next) => {
+exports.router.post('/login', async (req, res, next) => {
     try {
         const { email, password } = loginSchema.parse(req.body);
         const normalizedEmail = email.trim().toLowerCase();
@@ -103,7 +101,7 @@ exports.router.post("/login", async (req, res, next) => {
             if (password !== config.password) {
                 return res
                     .status(401)
-                    .json({ error: { message: "Invalid credentials" } });
+                    .json({ error: { message: 'Invalid credentials' } });
             }
             const { organisation, user } = await (0, platformAdmin_1.ensurePlatformAdminAccount)();
             const access = (0, auth_1.signAccessToken)({
@@ -136,32 +134,28 @@ exports.router.post("/login", async (req, res, next) => {
         if (!user)
             return res
                 .status(401)
-                .json({ error: { message: "Invalid credentials" } });
+                .json({ error: { message: 'Invalid credentials' } });
         if (!user.isActive)
-            return res
-                .status(403)
-                .json({
-                error: { message: "Account is inactive. Contact your administrator." },
+            return res.status(403).json({
+                error: { message: 'Account is inactive. Contact your administrator.' },
             });
         if (!user.organisation?.isActive)
-            return res
-                .status(403)
-                .json({
+            return res.status(403).json({
                 error: {
-                    message: "Organisation access is inactive. Contact My Homecare support.",
+                    message: 'Organisation access is inactive. Contact My Homecare support.',
                 },
             });
-        if ((user.role === "CAREGIVER" || user.role === "BRANCH_MANAGER") &&
+        if ((user.role === 'CAREGIVER' || user.role === 'BRANCH_MANAGER') &&
             !user.branchId) {
             return res
                 .status(403)
-                .json({ error: { message: "User is not assigned to a branch" } });
+                .json({ error: { message: 'User is not assigned to a branch' } });
         }
         const ok = await bcrypt_1.default.compare(password, user.passwordHash);
         if (!ok)
             return res
                 .status(401)
-                .json({ error: { message: "Invalid credentials" } });
+                .json({ error: { message: 'Invalid credentials' } });
         const access = (0, auth_1.signAccessToken)({
             sub: user.id,
             orgId: user.organisationId,
@@ -188,14 +182,14 @@ exports.router.post("/login", async (req, res, next) => {
 const forgotPasswordSchema = zod_1.z.object({
     email: zod_1.z.string().email(),
 });
-exports.router.post("/forgot-password", async (req, res, next) => {
+exports.router.post('/forgot-password', async (req, res, next) => {
     try {
         const { email } = forgotPasswordSchema.parse(req.body);
         const user = await prisma_1.prisma.user.findUnique({ where: { email } });
         // Always return a generic success message to avoid account enumeration.
         if (!user) {
             return res.json({
-                data: { message: "If an account exists, an OTP has been sent." },
+                data: { message: 'If an account exists, an OTP has been sent.' },
             });
         }
         const otp = String(Math.floor(100000 + Math.random() * 900000));
@@ -220,7 +214,7 @@ exports.router.post("/forgot-password", async (req, res, next) => {
         });
         await (0, mailer_1.sendPasswordResetOtpEmail)({ to: email, otp });
         res.json({
-            data: { message: "If an account exists, an OTP has been sent." },
+            data: { message: 'If an account exists, an OTP has been sent.' },
         });
     }
     catch (e) {
@@ -229,27 +223,27 @@ exports.router.post("/forgot-password", async (req, res, next) => {
 });
 const verifyResetOtpSchema = zod_1.z.object({
     email: zod_1.z.string().email(),
-    otp: zod_1.z.string().regex(/^\d{6}$/, "OTP must be 6 digits"),
+    otp: zod_1.z.string().regex(/^\d{6}$/, 'OTP must be 6 digits'),
 });
-exports.router.post("/verify-reset-otp", async (req, res, next) => {
+exports.router.post('/verify-reset-otp', async (req, res, next) => {
     try {
         const { email, otp } = verifyResetOtpSchema.parse(req.body);
         const user = await prisma_1.prisma.user.findUnique({ where: { email } });
         if (!user) {
-            return res.status(400).json({ error: { message: "Invalid OTP" } });
+            return res.status(400).json({ error: { message: 'Invalid OTP' } });
         }
         const reset = await prisma_1.prisma.passwordReset.findUnique({
             where: { userId: user.id },
         });
         if (!reset || reset.consumedAt) {
-            return res.status(400).json({ error: { message: "Invalid OTP" } });
+            return res.status(400).json({ error: { message: 'Invalid OTP' } });
         }
         if (reset.otpExpiresAt.getTime() < Date.now()) {
-            return res.status(400).json({ error: { message: "OTP expired" } });
+            return res.status(400).json({ error: { message: 'OTP expired' } });
         }
         if (reset.attempts >= 5) {
             return res.status(429).json({
-                error: { message: "Too many failed attempts. Request a new OTP." },
+                error: { message: 'Too many failed attempts. Request a new OTP.' },
             });
         }
         const ok = await bcrypt_1.default.compare(otp, reset.otpHash);
@@ -258,13 +252,13 @@ exports.router.post("/verify-reset-otp", async (req, res, next) => {
                 where: { userId: user.id },
                 data: { attempts: { increment: 1 } },
             });
-            return res.status(400).json({ error: { message: "Invalid OTP" } });
+            return res.status(400).json({ error: { message: 'Invalid OTP' } });
         }
-        const resetToken = crypto_1.default.randomBytes(32).toString("hex");
+        const resetToken = crypto_1.default.randomBytes(32).toString('hex');
         const resetTokenHash = crypto_1.default
-            .createHash("sha256")
+            .createHash('sha256')
             .update(resetToken)
-            .digest("hex");
+            .digest('hex');
         await prisma_1.prisma.passwordReset.update({
             where: { userId: user.id },
             data: {
@@ -290,12 +284,14 @@ const resetPasswordSchema = zod_1.z.object({
     resetToken: zod_1.z.string().min(16),
     newPassword: zod_1.z.string().min(6),
 });
-exports.router.post("/reset-password", async (req, res, next) => {
+exports.router.post('/reset-password', async (req, res, next) => {
     try {
         const { email, resetToken, newPassword } = resetPasswordSchema.parse(req.body);
         const user = await prisma_1.prisma.user.findUnique({ where: { email } });
         if (!user) {
-            return res.status(400).json({ error: { message: "Invalid reset token" } });
+            return res
+                .status(400)
+                .json({ error: { message: 'Invalid reset token' } });
         }
         const reset = await prisma_1.prisma.passwordReset.findUnique({
             where: { userId: user.id },
@@ -304,19 +300,23 @@ exports.router.post("/reset-password", async (req, res, next) => {
             reset.consumedAt ||
             !reset.resetTokenHash ||
             !reset.resetTokenExpiresAt) {
-            return res.status(400).json({ error: { message: "Invalid reset token" } });
+            return res
+                .status(400)
+                .json({ error: { message: 'Invalid reset token' } });
         }
         if (reset.resetTokenExpiresAt.getTime() < Date.now()) {
             return res
                 .status(400)
-                .json({ error: { message: "Reset token expired" } });
+                .json({ error: { message: 'Reset token expired' } });
         }
         const providedHash = crypto_1.default
-            .createHash("sha256")
+            .createHash('sha256')
             .update(resetToken)
-            .digest("hex");
+            .digest('hex');
         if (providedHash !== reset.resetTokenHash) {
-            return res.status(400).json({ error: { message: "Invalid reset token" } });
+            return res
+                .status(400)
+                .json({ error: { message: 'Invalid reset token' } });
         }
         const passwordHash = await bcrypt_1.default.hash(newPassword, 10);
         await prisma_1.prisma.$transaction([
@@ -333,13 +333,13 @@ exports.router.post("/reset-password", async (req, res, next) => {
                 },
             }),
         ]);
-        res.json({ data: { message: "Password reset successful" } });
+        res.json({ data: { message: 'Password reset successful' } });
     }
     catch (e) {
         next(e);
     }
 });
-exports.router.post("/refresh", async (req, res, next) => {
+exports.router.post('/refresh', async (req, res, next) => {
     try {
         const { refresh } = zod_1.z
             .object({ refresh: zod_1.z.string().min(1) })
@@ -351,7 +351,7 @@ exports.router.post("/refresh", async (req, res, next) => {
         if (revoked)
             return res
                 .status(401)
-                .json({ error: { message: "Refresh token revoked" } });
+                .json({ error: { message: 'Refresh token revoked' } });
         const user = await prisma_1.prisma.user.findUnique({
             where: { id: payload.sub },
             include: {
@@ -361,19 +361,15 @@ exports.router.post("/refresh", async (req, res, next) => {
             },
         });
         if (!user)
-            return res.status(401).json({ error: { message: "User not found" } });
+            return res.status(401).json({ error: { message: 'User not found' } });
         if (!user.isActive)
-            return res
-                .status(403)
-                .json({
-                error: { message: "Account is inactive. Contact your administrator." },
+            return res.status(403).json({
+                error: { message: 'Account is inactive. Contact your administrator.' },
             });
-        if (user.role !== "PLATFORM_ADMIN" && !user.organisation?.isActive)
-            return res
-                .status(403)
-                .json({
+        if (user.role !== 'PLATFORM_ADMIN' && !user.organisation?.isActive)
+            return res.status(403).json({
                 error: {
-                    message: "Organisation access is inactive. Contact My Homecare support.",
+                    message: 'Organisation access is inactive. Contact My Homecare support.',
                 },
             });
         const access = (0, auth_1.signAccessToken)({
@@ -391,7 +387,7 @@ exports.router.post("/refresh", async (req, res, next) => {
         await prisma_1.prisma.revokedToken.create({
             data: {
                 jti: payload.jti,
-                type: "refresh",
+                type: 'refresh',
                 expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000),
             },
         });
@@ -401,12 +397,12 @@ exports.router.post("/refresh", async (req, res, next) => {
         next(e);
     }
 });
-exports.router.post("/logout", async (req, res, next) => {
+exports.router.post('/logout', async (req, res, next) => {
     try {
         const { token, type } = zod_1.z
-            .object({ token: zod_1.z.string().min(1), type: zod_1.z.enum(["access", "refresh"]) })
+            .object({ token: zod_1.z.string().min(1), type: zod_1.z.enum(['access', 'refresh']) })
             .parse(req.body);
-        const secret = type === "refresh"
+        const secret = type === 'refresh'
             ? process.env.JWT_REFRESH_SECRET
             : process.env.JWT_ACCESS_SECRET;
         const payload = jsonwebtoken_1.default.verify(token, secret);
