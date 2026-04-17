@@ -7,5 +7,8 @@ import { setupRealtimeHub } from './realtime/hub';
 const port = process.env.PORT ? Number(process.env.PORT) : 4000;
 const app = createServer();
 const server = createHttpServer(app);
+
 setupRealtimeHub(server);
-server.listen(port, () => console.log(`🚀 API listening on http://localhost:${port}`));
+server.listen(port, () =>
+  console.log(`🚀 API listening on http://localhost:${port}`),
+);
