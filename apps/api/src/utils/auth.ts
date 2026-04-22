@@ -15,7 +15,7 @@ export type JwtPayload = {
 export function signAccessToken(payload: Omit<JwtPayload, 'type'|'jti'>) {
   const secret = process.env.JWT_ACCESS_SECRET!;
   const jti = crypto.randomUUID();
-  return jwt.sign({ ...payload, type: 'access', jti }, secret, { expiresIn: '15m' });
+  return jwt.sign({ ...payload, type: 'access', jti }, secret, { expiresIn: '3d' });
 }
 
 export function signRefreshToken(payload: Omit<JwtPayload, 'type'|'jti'>) {

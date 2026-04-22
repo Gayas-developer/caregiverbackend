@@ -17,7 +17,7 @@ const prisma_1 = require("./prisma");
 function signAccessToken(payload) {
     const secret = process.env.JWT_ACCESS_SECRET;
     const jti = crypto_1.default.randomUUID();
-    return jsonwebtoken_1.default.sign({ ...payload, type: 'access', jti }, secret, { expiresIn: '15m' });
+    return jsonwebtoken_1.default.sign({ ...payload, type: 'access', jti }, secret, { expiresIn: '3d' });
 }
 function signRefreshToken(payload) {
     const secret = process.env.JWT_REFRESH_SECRET;
